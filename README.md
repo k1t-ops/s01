@@ -27,7 +27,49 @@ The Host Discovery Service enables secure service discovery across your infrastr
 - **🐳 Docker Ready**: Complete containerized deployment
 - **🔧 Production Ready**: Configurable timeouts, limits, and monitoring
 
-## Quick Start
+## 🚀 One-Liner Installation
+
+Install precompiled binaries directly from GitHub releases:
+
+### Using curl
+```bash
+# Install both server and client
+curl -fsSL https://raw.githubusercontent.com/k1t-ops/s01/main/install.sh | bash
+
+# Install server only
+curl -fsSL https://raw.githubusercontent.com/k1t-ops/s01/main/install.sh | bash -s -- --server-only
+
+# Install client only
+curl -fsSL https://raw.githubusercontent.com/k1t-ops/s01/main/install.sh | bash -s -- --client-only
+```
+
+### Using wget
+```bash
+# Install both server and client
+wget -qO- https://raw.githubusercontent.com/k1t-ops/s01/main/install.sh | bash
+
+# Install server only
+wget -qO- https://raw.githubusercontent.com/k1t-ops/s01/main/install.sh | bash -s -- --server-only
+
+# Install client only
+wget -qO- https://raw.githubusercontent.com/k1t-ops/s01/main/install.sh | bash -s -- --client-only
+```
+
+### Advanced Options
+```bash
+# Install specific version
+curl -fsSL https://raw.githubusercontent.com/k1t-ops/s01/main/install.sh | bash -s -- --version v1.0.0
+
+# System-wide installation (requires sudo)
+curl -fsSL https://raw.githubusercontent.com/k1t-ops/s01/main/install.sh | sudo bash -s -- --system
+
+# Custom install location
+curl -fsSL https://raw.githubusercontent.com/k1t-ops/s01/main/install.sh | bash -s -- --prefix /opt/discovery
+```
+
+For detailed installation options, see **[📖 QUICK-INSTALL.md](QUICK-INSTALL.md)**
+
+## Quick Start (Docker)
 
 ### 1. Initialize and Start
 ```bash
@@ -80,7 +122,7 @@ Key environment variables:
 
 ```bash
 SERVER_PORT=8443          # HTTPS API port
-HEALTH_PORT=8080          # HTTP health check port  
+HEALTH_PORT=8080          # HTTP health check port
 MAX_HISTORY=100           # Status history per host
 STALE_TIMEOUT=300         # Seconds before marking host as "lost"
 ```
@@ -92,7 +134,7 @@ make help                 # Show all available commands
 make init                 # Complete initialization from zero
 make test                 # Run full test suite
 make start                # Start core services
-make start-demo           # Start with demo clients  
+make start-demo           # Start with demo clients
 make health               # Check service health
 make status               # Show service status
 make clean-all            # Complete cleanup
@@ -120,7 +162,7 @@ make cert SERVICE=my-service INSTANCE=my-instance-01
 ## Ports
 
 - **8443**: Discovery Server API (HTTPS, mTLS required)
-- **8080**: Health check endpoint (HTTP, no auth)  
+- **8080**: Health check endpoint (HTTP, no auth)
 - **9000**: Step-CA management (HTTPS)
 
 ## Requirements

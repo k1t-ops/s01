@@ -64,6 +64,7 @@ ${YELLOW}OPTIONS:${NC}
   --repo REPO           Use different GitHub repository
   --prefix PATH         Install to custom prefix (default: $INSTALL_PREFIX)
   --system             Install system-wide (requires sudo)
+  --diagnose           Show system diagnostics and exit
   --help               Show this help message
 
 ${YELLOW}EXAMPLES:${NC}
@@ -105,39 +106,100 @@ check_dependencies() {
 
 # Detect system architecture
 detect_arch() {
-    local arch
-    arch="$(uname -m)"
+    local raw_arch
+    raw_arch="$(uname -m 2>/dev/null)"
 
-    case "$arch" in
-        x86_64|amd64) echo "amd64" ;;
-        aarch64|arm64) echo "arm64" ;;
-        armv7l) echo "arm" ;;
+    if [[ -z "$raw_arch" ]]; then
+        log_error "Cannot detect system architecture"
+        log_error "Please specify architecture manually or check system compatibility"
+        exit 1
+    fi
+
+    local normalized_arch
+    case "$raw_arch" in
+        x86_64|amd64)
+            normalized_arch="amd64"
+            ;;
+        aarch64|arm64)
+            normalized_arch="arm64"
+            ;;
+        armv7l|armv7*)
+            normalized_arch="arm"
+            ;;
+        i386|i686)
+            log_error "32-bit x86 architecture ($raw_arch) is not supported"
+            log_error "This installer requires 64-bit systems"
+            log_error "Supported architectures: x86_64 (amd64), aarch64 (arm64), armv7l (arm)"
+            exit 1
+            ;;
         *)
-            log_error "Unsupported architecture: $arch"
+            log_error "Unsupported architecture: $raw_arch"
+            echo
+            log_error "Supported architectures:"
+            log_error "  • x86_64 (Intel/AMD 64-bit) → amd64 binaries"
+            log_error "  • aarch64 (ARM 64-bit) → arm64 binaries"
+            log_error "  • armv7l (ARM 32-bit) → arm binaries"
+            echo
+            log_error "If you believe this architecture should be supported,"
+            log_error "please open an issue at: https://github.com/$GITHUB_REPO/issues"
             exit 1
             ;;
     esac
+
+    log_debug "Detected architecture: $raw_arch → $normalized_arch"
+    echo "$normalized_arch"
 }
 
 # Get latest version from GitHub
 get_latest_version() {
-    log_info "Getting latest version from GitHub..."
-
     local auth_header=""
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
         auth_header="-H Authorization: token $GITHUB_TOKEN"
     fi
 
-    local version
-    version=$(curl -s $auth_header "https://api.github.com/repos/$GITHUB_REPO/releases/latest" | \
-              grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    log_debug "Fetching latest version from GitHub API..."
 
-    if [[ -z "$version" || "$version" == "null" ]]; then
-        log_error "Failed to get latest version from $GITHUB_REPO"
-        log_error "Please check if the repository exists and has releases"
+    # Check if we can reach GitHub first
+    if ! curl -s --connect-timeout 10 https://api.github.com > /dev/null 2>&1; then
+        log_error "Cannot connect to GitHub API"
+        log_error "Please check your internet connection and try again"
         exit 1
     fi
 
+    local api_response
+    api_response=$(curl -s $auth_header "https://api.github.com/repos/$GITHUB_REPO/releases/latest" 2>/dev/null)
+
+    # Check if we got a valid response
+    if [[ -z "$api_response" ]]; then
+        log_error "No response from GitHub API"
+        log_error "Repository: https://github.com/$GITHUB_REPO"
+        exit 1
+    fi
+
+    # Check for API errors
+    if echo "$api_response" | grep -q '"message".*"Not Found"'; then
+        log_error "Repository not found: $GITHUB_REPO"
+        echo
+        log_error "Please check:"
+        log_error "  • Repository name is correct"
+        log_error "  • Repository exists at: https://github.com/$GITHUB_REPO"
+        log_error "  • Repository is public (or set GITHUB_TOKEN for private repos)"
+        exit 1
+    fi
+
+    local version
+    version=$(echo "$api_response" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | head -1)
+
+    if [[ -z "$version" || "$version" == "null" ]]; then
+        log_error "No releases found for repository: $GITHUB_REPO"
+        echo
+        log_error "The repository exists but has no published releases."
+        log_error "Please ask the maintainer to create a release with binaries."
+        log_error "Releases page: https://github.com/$GITHUB_REPO/releases"
+        exit 1
+    fi
+
+    log_info "Found latest version: $version"
     echo "$version"
 }
 
@@ -148,31 +210,68 @@ download_binary() {
     local arch="$3"
     local temp_dir="$4"
 
-    log_info "Downloading $component binary (version: $version, arch: $arch)..."
-
     local binary_name="discovery-${component}-linux-${arch}"
     local download_url="https://github.com/$GITHUB_REPO/releases/download/$version/${binary_name}.tar.gz"
+
+    log_info "Downloading $component binary..."
+    log_debug "  Version: $version"
+    log_debug "  Architecture: $arch"
+    log_debug "  URL: $download_url"
 
     local auth_header=""
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
         auth_header="-H Authorization: token $GITHUB_TOKEN"
     fi
 
-    log_debug "Download URL: $download_url"
+    # Test if URL is accessible first
+    local http_code
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" $auth_header "$download_url" 2>/dev/null)
 
-    if ! curl -fsSL $auth_header "$download_url" -o "$temp_dir/${component}.tar.gz"; then
-        log_error "Failed to download $component binary"
+    case "$http_code" in
+        200)
+            log_debug "Download URL is accessible"
+            ;;
+        404)
+            log_error "Binary not found: $binary_name.tar.gz"
+            echo
+            log_error "This means:"
+            log_error "  • Release $version exists but doesn't have binaries for $arch architecture"
+            log_error "  • Check available files at: https://github.com/$GITHUB_REPO/releases/tag/$version"
+            echo
+            log_error "Supported architectures are typically: amd64, arm64, arm"
+            return 1
+            ;;
+        403)
+            log_error "Access denied to repository: $GITHUB_REPO"
+            echo
+            log_error "This means:"
+            log_error "  • Repository is private and requires authentication"
+            log_error "  • Set GITHUB_TOKEN environment variable with a valid token"
+            return 1
+            ;;
+        *)
+            log_error "Cannot access release (HTTP $http_code)"
+            log_error "URL: $download_url"
+            echo
+            log_error "Check if:"
+            log_error "  • Repository exists: https://github.com/$GITHUB_REPO"
+            log_error "  • Release $version exists"
+            log_error "  • Internet connection is working"
+            return 1
+            ;;
+    esac
+
+    # Download the file
+    if ! curl -fsSL $auth_header "$download_url" -o "$temp_dir/${component}.tar.gz" 2>/dev/null; then
+        log_error "Download failed despite accessibility check"
         log_error "URL: $download_url"
-        log_error "This could mean:"
-        log_error "  - Release doesn't exist for version $version"
-        log_error "  - Binary not available for architecture $arch"
-        log_error "  - Repository is private and needs GITHUB_TOKEN"
         return 1
     fi
 
     # Extract binary
-    if ! tar -xzf "$temp_dir/${component}.tar.gz" -C "$temp_dir"; then
-        log_error "Failed to extract $component binary"
+    if ! tar -xzf "$temp_dir/${component}.tar.gz" -C "$temp_dir" 2>/dev/null; then
+        log_error "Failed to extract downloaded archive"
+        log_error "The downloaded file may be corrupted"
         return 1
     fi
 
@@ -181,15 +280,125 @@ download_binary() {
     binary_file=$(find "$temp_dir" -name "discovery-${component}" -type f | head -1)
 
     if [[ ! -f "$binary_file" ]]; then
-        log_error "Could not find discovery-${component} executable in downloaded archive"
+        log_error "Archive extracted but no executable found"
+        log_error "Expected: discovery-${component}"
+        log_error "Archive contents:"
+        tar -tzf "$temp_dir/${component}.tar.gz" | head -5
         return 1
     fi
 
     # Make executable
     chmod +x "$binary_file"
 
-    log_info "✓ $component binary downloaded and extracted"
+    log_info "✓ $component binary ready"
     echo "$binary_file"
+}
+
+# Diagnose system for troubleshooting
+diagnose_system() {
+    echo -e "${CYAN}System Diagnostics${NC}"
+    echo "=================="
+    echo
+
+    echo "System Information:"
+    echo "  OS: $(uname -s 2>/dev/null || echo 'Unknown')"
+    echo "  Architecture: $(uname -m 2>/dev/null || echo 'Unknown')"
+    echo "  Kernel: $(uname -r 2>/dev/null || echo 'Unknown')"
+    echo
+
+    echo "Network Connectivity:"
+    if ping -c 1 8.8.8.8 >/dev/null 2>&1; then
+        echo "  Internet: ✓ Connected"
+    else
+        echo "  Internet: ✗ No connection"
+    fi
+
+    if curl -s --connect-timeout 5 https://api.github.com >/dev/null 2>&1; then
+        echo "  GitHub API: ✓ Accessible"
+    else
+        echo "  GitHub API: ✗ Cannot connect"
+    fi
+    echo
+
+    echo "Repository Information:"
+    echo "  Repository: $GITHUB_REPO"
+    echo "  Releases URL: https://github.com/$GITHUB_REPO/releases"
+    echo
+
+    echo "Architecture Mapping:"
+    local raw_arch=$(uname -m 2>/dev/null || echo "unknown")
+    echo "  Raw: $raw_arch"
+    case "$raw_arch" in
+        x86_64|amd64) echo "  Normalized: amd64" ;;
+        aarch64|arm64) echo "  Normalized: arm64" ;;
+        armv7l|armv7*) echo "  Normalized: arm" ;;
+        *) echo "  Normalized: UNSUPPORTED" ;;
+    esac
+    echo
+
+    echo "Available Tools:"
+    for tool in curl tar; do
+        if command -v "$tool" >/dev/null 2>&1; then
+            echo "  $tool: ✓ Available"
+        else
+            echo "  $tool: ✗ Missing"
+        fi
+    done
+    echo
+
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        echo "Authentication: ✓ GITHUB_TOKEN set"
+    else
+        echo "Authentication: No GITHUB_TOKEN (OK for public repos)"
+    fi
+    echo
+}
+
+# Download with architecture fallback
+download_with_fallback() {
+    local component="$1"
+    local version="$2"
+    local primary_arch="$3"
+    local temp_dir="$4"
+
+    # Try primary architecture first
+    if download_binary "$component" "$version" "$primary_arch" "$temp_dir"; then
+        return 0
+    fi
+
+    log_warn "$component binary not available for $primary_arch architecture"
+
+    # Define fallback architectures based on primary
+    local fallback_archs=()
+    case "$primary_arch" in
+        arm64)
+            fallback_archs=("amd64")
+            log_info "Trying fallback: ARM64 → AMD64 (may work with emulation)"
+            ;;
+        arm)
+            fallback_archs=("amd64")
+            log_info "Trying fallback: ARM → AMD64 (may work with emulation)"
+            ;;
+        amd64)
+            # No fallbacks for amd64 as it's the most common
+            ;;
+    esac
+
+    # Try fallback architectures
+    for fallback_arch in "${fallback_archs[@]}"; do
+        log_info "Attempting download with $fallback_arch architecture..."
+        if download_binary "$component" "$version" "$fallback_arch" "$temp_dir"; then
+            log_warn "Using $fallback_arch binary instead of $primary_arch"
+            log_warn "This may work but is not optimal for your system"
+            return 0
+        fi
+    done
+
+    log_error "No compatible binary found for any architecture"
+    echo
+    log_error "Tried architectures: $primary_arch ${fallback_archs[*]}"
+    log_error "Check available releases: https://github.com/$GITHUB_REPO/releases/tag/$version"
+    return 1
 }
 
 # Install binary
@@ -411,6 +620,10 @@ while [[ $# -gt 0 ]]; do
             SERVICE_USER="root"
             shift
             ;;
+        --diagnose)
+            diagnose_system
+            exit 0
+            ;;
         --help|-h)
             print_banner
             usage
@@ -475,28 +688,36 @@ main() {
 
     # Download and install server
     if [[ "$INSTALL_SERVER" == "true" ]]; then
+        echo
+        log_info "=== Installing Server ==="
         local server_binary
-        if server_binary=$(download_binary "server" "$VERSION" "$arch" "$temp_dir"); then
+        if server_binary=$(download_with_fallback "server" "$VERSION" "$arch" "$temp_dir"); then
             install_binary "$server_binary" "server" "$bin_dir"
             create_config "server"
             create_wrapper "server" "$bin_dir"
             installed_components+=("server")
         else
-            log_error "Failed to install server"
+            echo
+            log_error "Server installation failed"
+            log_error "Run with --diagnose for troubleshooting information"
             exit 1
         fi
     fi
 
     # Download and install client
     if [[ "$INSTALL_CLIENT" == "true" ]]; then
+        echo
+        log_info "=== Installing Client ==="
         local client_binary
-        if client_binary=$(download_binary "client" "$VERSION" "$arch" "$temp_dir"); then
+        if client_binary=$(download_with_fallback "client" "$VERSION" "$arch" "$temp_dir"); then
             install_binary "$client_binary" "client" "$bin_dir"
             create_config "client"
             create_wrapper "client" "$bin_dir"
             installed_components+=("client")
         else
-            log_error "Failed to install client"
+            echo
+            log_error "Client installation failed"
+            log_error "Run with --diagnose for troubleshooting information"
             exit 1
         fi
     fi
