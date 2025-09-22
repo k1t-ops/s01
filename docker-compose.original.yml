@@ -1,0 +1,279 @@
+version: "3.8"
+
+services:
+  step-ca:
+    image: smallstep/step-ca:latest
+    container_name: step-ca
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    environment:
+      - DOCKER_STEPCA_INIT_NAME=Host Discovery CA
+      - DOCKER_STEPCA_INIT_DNS_NAMES=step-ca,localhost,127.0.0.1
+      - DOCKER_STEPCA_INIT_REMOTE_MANAGEMENT=true
+      - DOCKER_STEPCA_INIT_ACME=false
+    volumes:
+      - ./ca/step:/home/step
+      - ./ca/config:/etc/step-ca
+      - ./ca/certs:/etc/ssl/step
+    networks:
+      - discovery-net
+    healthcheck:
+      test: ["CMD", "step", "ca", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    command:
+      [
+        "/usr/local/bin/step-ca",
+        "--password-file=/home/step/secrets/password",
+        "/home/step/config/ca.json",
+      ]
+
+  # Optional: step-ca init helper (run once to initialize)
+  step-ca-init:
+    image: smallstep/step-ca:latest
+    container_name: step-ca-init
+    profiles:
+      - init
+    environment:
+      - STEPCA_INIT_NAME=Host Discovery CA
+      - STEPCA_INIT_DNS_NAMES=step-ca,localhost,127.0.0.1
+      - STEPCA_INIT_REMOTE_MANAGEMENT=true
+      - STEPCA_INIT_PASSWORD_FILE=/home/step/secrets/password
+    volumes:
+      - ./ca/step:/home/step
+      - ./ca/config:/etc/step-ca
+      - ./ca/certs:/etc/ssl/step
+    networks:
+      - discovery-net
+    command: [
+        "sh",
+        "-c",
+        "if [ ! -f /home/step/config/ca.json ]; then
+        echo 'Initializing step-ca...';
+        mkdir -p /home/step/secrets;
+        echo '${CA_PASSWORD:-changeme123}' > /home/step/secrets/password;
+        step ca init \
+        --name='Host Discovery CA' \
+        --dns='step-ca,localhost,127.0.0.1' \
+        --address=':9000' \
+        --provisioner='admin' \
+        --password-file=/home/step/secrets/password \
+        --with-ca-url='https://step-ca:9000' \
+        --no-db;
+        echo 'Step-ca initialized successfully';
+        else
+        echo 'Step-ca already initialized';
+        fi",
+      ]
+
+  # Discovery server (we'll build this)
+  discovery-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: discovery-server
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+      - "8080:8080"
+    environment:
+      - STEP_CA_URL=https://step-ca:9000
+      - SERVER_PORT=8443
+      - HEALTH_PORT=8080
+      - MAX_HISTORY=100
+      - STALE_TIMEOUT=300
+      - CA_CERT_FILE=/etc/ssl/certs/ca_chain.crt
+    volumes:
+      - ./ca/certs:/etc/ssl/certs
+      - ./server/config:/etc/discovery
+    depends_on:
+      step-ca:
+        condition: service_healthy
+    networks:
+      - discovery-net
+    healthcheck:
+      test: ["CMD", "curl", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Discovery clients for testing and demonstration
+  client-web-01:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: discovery-client-web-01
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=web-service
+      - INSTANCE_NAME=web-01
+      - SERVER_URL=https://discovery-server:8443
+      - CERT_FILE=/etc/ssl/certs/client.crt
+      - KEY_FILE=/etc/ssl/certs/client.key
+      - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
+      - LOG_LEVEL=info
+      - REPORT_INTERVAL=15
+      - HEALTH_CPU_THRESHOLD=70.0
+      - HEALTH_MEMORY_THRESHOLD=80.0
+      - HEALTH_DISK_THRESHOLD=85.0
+      - HEALTH_SCORE_HEALTHY_MIN=85
+    volumes:
+      - ./ca/certs:/etc/ssl/certs:ro
+      - ./client/health-config.json:/etc/discovery/health-config.json:ro
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      step-ca:
+        condition: service_healthy
+    networks:
+      - discovery-net
+    profiles:
+      - clients
+      - demo
+
+  client-api-01:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: discovery-client-api-01
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=api-service
+      - INSTANCE_NAME=api-01
+      - SERVER_URL=https://discovery-server:8443
+      - CERT_FILE=/etc/ssl/certs/client.crt
+      - KEY_FILE=/etc/ssl/certs/client.key
+      - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
+      - LOG_LEVEL=info
+      - REPORT_INTERVAL=30
+      - HEALTH_CPU_THRESHOLD=75.0
+      - HEALTH_MEMORY_THRESHOLD=85.0
+      - HEALTH_DISK_THRESHOLD=90.0
+      - HEALTH_SCORE_HEALTHY_MIN=80
+    volumes:
+      - ./ca/certs:/etc/ssl/certs:ro
+      - ./client/health-config.json:/etc/discovery/health-config.json:ro
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      step-ca:
+        condition: service_healthy
+    networks:
+      - discovery-net
+    profiles:
+      - clients
+      - demo
+
+  client-db-primary:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: discovery-client-db-primary
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=database
+      - INSTANCE_NAME=db-primary
+      - SERVER_URL=https://discovery-server:8443
+      - CERT_FILE=/etc/ssl/certs/client.crt
+      - KEY_FILE=/etc/ssl/certs/client.key
+      - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
+      - LOG_LEVEL=info
+      - REPORT_INTERVAL=45
+      - HEALTH_CPU_THRESHOLD=85.0
+      - HEALTH_MEMORY_THRESHOLD=90.0
+      - HEALTH_DISK_THRESHOLD=95.0
+      - HEALTH_SCORE_HEALTHY_MIN=75
+      - HEALTH_NETWORK_ENABLED=true
+    volumes:
+      - ./ca/certs:/etc/ssl/certs:ro
+      - ./client/health-config.json:/etc/discovery/health-config.json:ro
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      step-ca:
+        condition: service_healthy
+    networks:
+      - discovery-net
+    profiles:
+      - clients
+      - demo
+
+  client-worker-01:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: discovery-client-worker-01
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=worker-service
+      - INSTANCE_NAME=worker-01
+      - SERVER_URL=https://discovery-server:8443
+      - CERT_FILE=/etc/ssl/certs/client.crt
+      - KEY_FILE=/etc/ssl/certs/client.key
+      - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
+      - LOG_LEVEL=debug
+      - REPORT_INTERVAL=20
+      - HEALTH_CPU_THRESHOLD=90.0
+      - HEALTH_MEMORY_THRESHOLD=85.0
+      - HEALTH_DISK_THRESHOLD=80.0
+      - HEALTH_SCORE_HEALTHY_MIN=70
+    volumes:
+      - ./ca/certs:/etc/ssl/certs:ro
+      - ./client/health-config.json:/etc/discovery/health-config.json:ro
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      step-ca:
+        condition: service_healthy
+    networks:
+      - discovery-net
+    profiles:
+      - clients
+      - demo
+
+  # Single client for basic testing
+  test-client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: discovery-test-client
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=test-service
+      - INSTANCE_NAME=test-client
+      - SERVER_URL=https://discovery-server:8443
+      - CERT_FILE=/etc/ssl/certs/test-client.crt
+      - KEY_FILE=/etc/ssl/certs/test-client.key
+      - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
+      - LOG_LEVEL=info
+      - REPORT_INTERVAL=10
+      - HEALTH_CPU_THRESHOLD=80.0
+      - HEALTH_MEMORY_THRESHOLD=85.0
+      - HEALTH_DISK_THRESHOLD=85.0
+    volumes:
+      - ./ca/certs:/etc/ssl/certs:ro
+      - ./client/health-config.json:/etc/discovery/health-config.json:ro
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      step-ca:
+        condition: service_healthy
+    networks:
+      - discovery-net
+    profiles:
+      - test
+
+networks:
+  discovery-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  step-data:
+  ca-config:
+  ca-certs:

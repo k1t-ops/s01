@@ -1,0 +1,146 @@
+{
+  "health_checks": {
+    "cpu": {
+      "enabled": true,
+      "healthy_threshold": 80.0,
+      "degraded_threshold": 90.0,
+      "critical_threshold": 95.0,
+      "weight": 25,
+      "description": "CPU usage percentage threshold"
+    },
+    "memory": {
+      "enabled": true,
+      "healthy_threshold": 85.0,
+      "degraded_threshold": 95.0,
+      "critical_threshold": 98.0,
+      "weight": 25,
+      "description": "Memory usage percentage threshold"
+    },
+    "disk": {
+      "enabled": true,
+      "healthy_threshold": 85.0,
+      "degraded_threshold": 95.0,
+      "critical_threshold": 98.0,
+      "weight": 25,
+      "paths": ["/", "/var", "/tmp"],
+      "description": "Disk usage percentage threshold for monitored paths"
+    },
+    "network": {
+      "enabled": true,
+      "weight": 25,
+      "timeout_seconds": 5,
+      "required_tests_pass": 2,
+      "tests": {
+        "dns_resolution": {
+          "enabled": true,
+          "hosts": ["google.com", "cloudflare.com", "github.com"]
+        },
+        "external_connectivity": {
+          "enabled": true,
+          "endpoints": [
+            {"host": "8.8.8.8", "port": 53, "timeout": 5},
+            {"host": "1.1.1.1", "port": 53, "timeout": 5}
+          ]
+        },
+        "local_networking": {
+          "enabled": true,
+          "bind_test": true
+        }
+      },
+      "description": "Network connectivity tests"
+    }
+  },
+  "advanced_checks": {
+    "load_average": {
+      "enabled": true,
+      "weight": 10,
+      "1min_threshold": 2.0,
+      "5min_threshold": 1.5,
+      "15min_threshold": 1.0,
+      "per_cpu_adjustment": true,
+      "description": "System load average monitoring"
+    },
+    "process_monitoring": {
+      "enabled": false,
+      "weight": 10,
+      "required_processes": [
+        {"name": "sshd", "min_count": 1},
+        {"name": "systemd", "min_count": 1}
+      ],
+      "forbidden_processes": [
+        {"name": "malware", "max_count": 0}
+      ],
+      "description": "Monitor critical system processes"
+    },
+    "port_checks": {
+      "enabled": false,
+      "weight": 15,
+      "required_ports": [
+        {"port": 22, "protocol": "tcp", "description": "SSH"},
+        {"port": 80, "protocol": "tcp", "description": "HTTP"}
+      ],
+      "forbidden_ports": [
+        {"port": 23, "protocol": "tcp", "description": "Telnet"}
+      ],
+      "description": "Monitor network port availability"
+    },
+    "file_system_checks": {
+      "enabled": false,
+      "weight": 10,
+      "checks": [
+        {
+          "path": "/etc/passwd",
+          "type": "exists",
+          "expected": true,
+          "description": "System passwd file"
+        },
+        {
+          "path": "/tmp",
+          "type": "writable",
+          "expected": true,
+          "description": "Temp directory writable"
+        }
+      ],
+      "description": "File system integrity checks"
+    }
+  },
+  "scoring": {
+    "healthy_score_min": 80,
+    "degraded_score_min": 60,
+    "unhealthy_score_max": 59,
+    "failure_penalty": 10,
+    "timeout_penalty": 5,
+    "description": "Overall health scoring configuration"
+  },
+  "reporting": {
+    "check_timeout_seconds": 30,
+    "max_check_attempts": 3,
+    "retry_delay_seconds": 2,
+    "include_metrics_in_status": true,
+    "detailed_logging": true,
+    "log_failed_checks_only": false,
+    "description": "Health check execution and reporting settings"
+  },
+  "performance": {
+    "concurrent_checks": true,
+    "max_concurrent": 5,
+    "cache_results_seconds": 10,
+    "skip_slow_checks_under_load": true,
+    "load_threshold_for_skip": 4.0,
+    "description": "Performance optimization settings"
+  },
+  "alerts": {
+    "status_change_alert": true,
+    "degraded_alert_threshold": 3,
+    "critical_alert_threshold": 1,
+    "alert_cooldown_minutes": 15,
+    "description": "Alert configuration for status changes"
+  },
+  "maintenance": {
+    "maintenance_mode": false,
+    "maintenance_status": "maintenance",
+    "maintenance_message": "System under maintenance",
+    "bypass_checks_in_maintenance": true,
+    "description": "Maintenance mode configuration"
+  }
+}

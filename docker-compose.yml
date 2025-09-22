@@ -1,0 +1,120 @@
+version: "3.8"
+
+# Base docker-compose configuration
+#
+# Usage:
+#   Development/Testing: docker-compose -f docker-compose.yml -f docker-compose.test.yml up
+#   Production:         docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+#   Basic setup:        docker-compose up (CA + Server only)
+
+services:
+  step-ca:
+    image: smallstep/step-ca:latest
+    container_name: step-ca
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    environment:
+      - DOCKER_STEPCA_INIT_NAME=Host Discovery CA
+      - DOCKER_STEPCA_INIT_DNS_NAMES=step-ca,localhost,127.0.0.1
+      - DOCKER_STEPCA_INIT_REMOTE_MANAGEMENT=true
+      - DOCKER_STEPCA_INIT_ACME=false
+    volumes:
+      - ./ca/step:/home/step
+      - ./ca/config:/etc/step-ca
+      - ./ca/certs:/etc/ssl/step
+    networks:
+      - discovery-net
+    healthcheck:
+      test: ["CMD", "step", "ca", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    command:
+      [
+        "/usr/local/bin/step-ca",
+        "--password-file=/home/step/secrets/password",
+        "/home/step/config/ca.json",
+      ]
+
+  step-ca-init:
+    image: smallstep/step-ca:latest
+    container_name: step-ca-init
+    profiles:
+      - init
+    environment:
+      - STEPCA_INIT_NAME=Host Discovery CA
+      - STEPCA_INIT_DNS_NAMES=step-ca,localhost,127.0.0.1
+      - STEPCA_INIT_REMOTE_MANAGEMENT=true
+      - STEPCA_INIT_PASSWORD_FILE=/home/step/secrets/password
+    volumes:
+      - ./ca/step:/home/step
+      - ./ca/config:/etc/step-ca
+      - ./ca/certs:/etc/ssl/step
+    networks:
+      - discovery-net
+    command: [
+        "sh",
+        "-c",
+        "if [ ! -f /home/step/config/ca.json ]; then
+        echo 'Initializing step-ca...';
+        mkdir -p /home/step/secrets;
+        echo '${CA_PASSWORD:-changeme123}' > /home/step/secrets/password;
+        step ca init \
+        --name='Host Discovery CA' \
+        --dns='step-ca,localhost,127.0.0.1' \
+        --address=':9000' \
+        --provisioner='admin' \
+        --password-file=/home/step/secrets/password \
+        --with-ca-url='https://step-ca:9000' \
+        --no-db;
+        echo 'Step-ca initialized successfully';
+        else
+        echo 'Step-ca already initialized';
+        fi",
+      ]
+
+  discovery-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: discovery-server
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+      - "8080:8080"
+    environment:
+      - STEP_CA_URL=https://step-ca:9000
+      - SERVER_PORT=8443
+      - HEALTH_PORT=8080
+      - MAX_HISTORY=100
+      - STALE_TIMEOUT=300
+      - CA_CERT_FILE=/etc/ssl/certs/ca_chain.crt
+      - LOG_LEVEL=info
+    volumes:
+      - ./ca/certs:/etc/ssl/certs
+      - ./server/config:/etc/discovery
+    depends_on:
+      step-ca:
+        condition: service_healthy
+    networks:
+      - discovery-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  discovery-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  step-data:
+  ca-config:
+  ca-certs:
