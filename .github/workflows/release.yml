@@ -1,4 +1,4 @@
-name: Build and Release Binaries
+name: Build and Release s01 Binaries
 
 on:
   push:
@@ -87,10 +87,10 @@ jobs:
           go mod tidy
           go build -a -installsuffix cgo \
             -ldflags="-w -s -X main.version=${{ steps.version.outputs.version }} -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X main.gitCommit=${{ github.sha }}" \
-            -o discovery-${{ matrix.component }} .
+            -o s01-${{ matrix.component }} .
 
           # Verify binary
-          file discovery-${{ matrix.component }}
+          file s01-${{ matrix.component }}
 
           echo "Binary built successfully"
 
@@ -98,20 +98,20 @@ jobs:
         working-directory: ${{ matrix.component }}
         run: |
           # Create package
-          tar -czf discovery-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz discovery-${{ matrix.component }}
+          tar -czf s01-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz s01-${{ matrix.component }}
 
           # Generate individual checksum
-          sha256sum discovery-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz > discovery-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz.sha256
+          sha256sum s01-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz > s01-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz.sha256
 
-          echo "Package created: discovery-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz"
+          echo "Package created: s01-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.arch }}-${{ matrix.component }}
           path: |
-            ${{ matrix.component }}/discovery-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz
-            ${{ matrix.component }}/discovery-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz.sha256
+            ${{ matrix.component }}/s01-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz
+            ${{ matrix.component }}/s01-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz.sha256
 
   # Create release with all artifacts
   create-release:
@@ -178,7 +178,7 @@ jobs:
           VERSION="${{ needs.build-matrix.outputs.version }}"
 
           cat > release_notes.md << EOF
-          # Host Discovery Service ${VERSION}
+          # s01 ${VERSION}
 
           🚀 **Multi-Architecture Release** supporting Linux on multiple architectures!
 
@@ -186,11 +186,11 @@ jobs:
 
           This release contains precompiled binaries for:
 
-          ### Discovery Server
-          $(find release -name "discovery-server-*.tar.gz" | sed 's/release\///' | sed 's/^/- **/' | sed 's/$/** - Server binary/')
+          ### s01 Server
+          $(find release -name "s01-server-*.tar.gz" | sed 's/release\///' | sed 's/^/- **/' | sed 's/$/** - Server binary/')
 
-          ### Discovery Client
-          $(find release -name "discovery-client-*.tar.gz" | sed 's/release\///' | sed 's/^/- **/' | sed 's/$/** - Client binary/')
+          ### s01 Client
+          $(find release -name "s01-client-*.tar.gz" | sed 's/release\///' | sed 's/^/- **/' | sed 's/$/** - Client binary/')
 
           ### Checksums
           - **checksums.txt** - SHA256 checksums for all binaries
@@ -228,25 +228,25 @@ jobs:
           ARCH=\$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/' | sed 's/armv7l/armv7/')
 
           # Download server
-          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/discovery-server-linux-\${ARCH}.tar.gz" | tar xz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-server-linux-\${ARCH}.tar.gz" | tar xz
 
           # Download client
-          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/discovery-client-linux-\${ARCH}.tar.gz" | tar xz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-client-linux-\${ARCH}.tar.gz" | tar xz
           \`\`\`
 
           ### Specific Architecture
           \`\`\`bash
           # AMD64/Intel (most common)
-          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/discovery-server-linux-amd64.tar.gz" | tar xz
-          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/discovery-client-linux-amd64.tar.gz" | tar xz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-server-linux-amd64.tar.gz" | tar xz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-client-linux-amd64.tar.gz" | tar xz
 
           # ARM64 (Apple M1, AWS Graviton, etc.)
-          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/discovery-server-linux-arm64.tar.gz" | tar xz
-          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/discovery-client-linux-arm64.tar.gz" | tar xz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-server-linux-arm64.tar.gz" | tar xz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-client-linux-arm64.tar.gz" | tar xz
 
           # ARMv7 (Raspberry Pi, etc.)
-          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/discovery-server-linux-armv7.tar.gz" | tar xz
-          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/discovery-client-linux-armv7.tar.gz" | tar xz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-server-linux-armv7.tar.gz" | tar xz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-client-linux-armv7.tar.gz" | tar xz
           \`\`\`
 
           ## ✅ Verification
@@ -270,8 +270,8 @@ jobs:
           ## 🚀 Quick Start
 
           1. **Install**: Use the one-liner or download manually
-          2. **Configure**: Edit \`~/.config/discovery/server.env\` and \`~/.config/discovery/client.env\`
-          3. **Run**: Execute \`discovery-server-run\` and \`discovery-client-run\`
+          2. **Configure**: Edit \`~/.config/s01/server.env\` and \`~/.config/s01/client.env\`
+          3. **Run**: Execute \`s01-server-run\` and \`s01-client-run\`
 
           ## 📋 Build Information
 
@@ -294,7 +294,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.build-matrix.outputs.version }}
-          name: "Discovery Service ${{ needs.build-matrix.outputs.version }}"
+          name: "s01 ${{ needs.build-matrix.outputs.version }}"
           body_path: release_notes.md
           draft: false
           prerelease: ${{ github.event.inputs.prerelease == 'true' || contains(needs.build-matrix.outputs.version, 'alpha') || contains(needs.build-matrix.outputs.version, 'beta') || contains(needs.build-matrix.outputs.version, 'rc') }}
@@ -314,12 +314,12 @@ jobs:
           echo "| Component | Architectures | Total Size |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|---------------|------------|" >> $GITHUB_STEP_SUMMARY
 
-          server_files=$(find release -name "discovery-server-*.tar.gz" | wc -l)
-          client_files=$(find release -name "discovery-client-*.tar.gz" | wc -l)
+          server_files=$(find release -name "s01-server-*.tar.gz" | wc -l)
+          client_files=$(find release -name "s01-client-*.tar.gz" | wc -l)
           total_size=$(du -ch release/*.tar.gz 2>/dev/null | tail -1 | cut -f1 || echo "N/A")
 
-          echo "| Server | $server_files | $(du -ch release/discovery-server-*.tar.gz 2>/dev/null | tail -1 | cut -f1 || echo "N/A") |" >> $GITHUB_STEP_SUMMARY
-          echo "| Client | $client_files | $(du -ch release/discovery-client-*.tar.gz 2>/dev/null | tail -1 | cut -f1 || echo "N/A") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Server | $server_files | $(du -ch release/s01-server-*.tar.gz 2>/dev/null | tail -1 | cut -f1 || echo "N/A") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Client | $client_files | $(du -ch release/s01-client-*.tar.gz 2>/dev/null | tail -1 | cut -f1 || echo "N/A") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Total** | **$(($server_files + $client_files))** | **$total_size** |" >> $GITHUB_STEP_SUMMARY
 
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -377,8 +377,8 @@ jobs:
           sleep 30
 
           # Test server download
-          if curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/discovery-server-linux-amd64.tar.gz" | tar xz; then
-            if ./discovery-server --help >/dev/null 2>&1 || ./discovery-server -h >/dev/null 2>&1; then
+          if curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-server-linux-amd64.tar.gz" | tar xz; then
+            if ./s01-server --help >/dev/null 2>&1 || ./s01-server -h >/dev/null 2>&1; then
               echo "✅ Server binary works"
             else
               echo "⚠️ Server binary downloaded but help command failed"
@@ -389,8 +389,8 @@ jobs:
           fi
 
           # Test client download
-          if curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/discovery-client-linux-amd64.tar.gz" | tar xz; then
-            if ./discovery-client --help >/dev/null 2>&1 || ./discovery-client -h >/dev/null 2>&1; then
+          if curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-client-linux-amd64.tar.gz" | tar xz; then
+            if ./s01-client --help >/dev/null 2>&1 || ./s01-client -h >/dev/null 2>&1; then
               echo "✅ Client binary works"
             else
               echo "⚠️ Client binary downloaded but help command failed"
@@ -415,7 +415,7 @@ jobs:
           fi
 
           # Download and verify a binary
-          if curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/discovery-server-linux-amd64.tar.gz" -o discovery-server-linux-amd64.tar.gz; then
+          if curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-server-linux-amd64.tar.gz" -o s01-server-linux-amd64.tar.gz; then
             # Verify checksum
             if sha256sum -c checksums.txt --ignore-missing; then
               echo "✅ Checksums verified successfully"

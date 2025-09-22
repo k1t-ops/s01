@@ -3,12 +3,12 @@ version: "3.8"
 services:
   step-ca:
     image: smallstep/step-ca:latest
-    container_name: step-ca-test
+    container_name: s01-ca-test
     restart: unless-stopped
     ports:
       - "9000:9000"
     environment:
-      - DOCKER_STEPCA_INIT_NAME=Host Discovery CA Test
+      - DOCKER_STEPCA_INIT_NAME=s01 CA Test
       - DOCKER_STEPCA_INIT_DNS_NAMES=step-ca,localhost,127.0.0.1
       - DOCKER_STEPCA_INIT_REMOTE_MANAGEMENT=true
       - DOCKER_STEPCA_INIT_ACME=false
@@ -17,7 +17,7 @@ services:
       - ./ca/config:/etc/step-ca
       - ./ca/certs:/etc/ssl/step
     networks:
-      - discovery-test-net
+      - s01-test-net
     healthcheck:
       test: ["CMD", "step", "ca", "health"]
       interval: 15s
@@ -33,9 +33,9 @@ services:
 
   step-ca-init:
     image: smallstep/step-ca:latest
-    container_name: step-ca-init-test
+    container_name: s01-ca-init-test
     environment:
-      - STEPCA_INIT_NAME=Host Discovery CA Test
+      - STEPCA_INIT_NAME=s01 CA Test
       - STEPCA_INIT_DNS_NAMES=step-ca,localhost,127.0.0.1
       - STEPCA_INIT_REMOTE_MANAGEMENT=true
       - STEPCA_INIT_PASSWORD_FILE=/home/step/secrets/password
@@ -44,7 +44,7 @@ services:
       - ./ca/config:/etc/step-ca
       - ./ca/certs:/etc/ssl/step
     networks:
-      - discovery-test-net
+      - s01-test-net
     command: [
         "sh",
         "-c",
@@ -53,24 +53,24 @@ services:
         mkdir -p /home/step/secrets;
         echo '${CA_PASSWORD:-testpassword123}' > /home/step/secrets/password;
         step ca init \
-        --name='Host Discovery CA Test' \
+        --name='s01 CA Test' \
         --dns='step-ca,localhost,127.0.0.1' \
         --address=':9000' \
         --provisioner='admin' \
         --password-file=/home/step/secrets/password \
         --with-ca-url='https://step-ca:9000' \
         --no-db;
-        echo 'Step-ca initialized successfully for testing';
+        echo 's01 CA initialized successfully for testing';
         else
         echo 'Step-ca already initialized';
         fi",
       ]
 
-  discovery-server:
+  s01-server:
     build:
       context: ./server
       dockerfile: Dockerfile
-    container_name: discovery-server-test
+    container_name: s01-server-test
     restart: unless-stopped
     ports:
       - "8443:8443"
@@ -85,12 +85,12 @@ services:
       - LOG_LEVEL=debug
     volumes:
       - ./ca/certs:/etc/ssl/certs
-      - ./server/config:/etc/discovery
+      - ./server/config:/etc/s01
     depends_on:
       step-ca:
         condition: service_healthy
     networks:
-      - discovery-test-net
+      - s01-test-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 15s
@@ -102,7 +102,7 @@ services:
     build:
       context: ./client
       dockerfile: Dockerfile
-    container_name: discovery-client-web-01-test
+    container_name: s01-client-web-01-test
     restart: unless-stopped
     environment:
       - SERVICE_NAME=web-service
@@ -122,18 +122,18 @@ services:
       - HEALTH_SCORE_HEALTHY_MIN=85
     volumes:
       - ./ca/certs:/etc/ssl/certs:ro
-      - ./client/health-config.json:/etc/discovery/health-config.json:ro
+      - ./client/health-config.json:/etc/s01/health-config.json:ro
     depends_on:
-      discovery-server:
+      s01-server:
         condition: service_healthy
     networks:
-      - discovery-test-net
+      - s01-test-net
 
   client-api-01:
     build:
       context: ./client
       dockerfile: Dockerfile
-    container_name: discovery-client-api-01-test
+    container_name: s01-client-api-01-test
     restart: unless-stopped
     environment:
       - SERVICE_NAME=api-service
@@ -153,18 +153,18 @@ services:
       - HEALTH_SCORE_HEALTHY_MIN=80
     volumes:
       - ./ca/certs:/etc/ssl/certs:ro
-      - ./client/health-config.json:/etc/discovery/health-config.json:ro
+      - ./client/health-config.json:/etc/s01/health-config.json:ro
     depends_on:
-      discovery-server:
+      s01-server:
         condition: service_healthy
     networks:
-      - discovery-test-net
+      - s01-test-net
 
   client-db-primary:
     build:
       context: ./client
       dockerfile: Dockerfile
-    container_name: discovery-client-db-primary-test
+    container_name: s01-client-db-primary-test
     restart: unless-stopped
     environment:
       - SERVICE_NAME=database
@@ -185,18 +185,18 @@ services:
       - HEALTH_NETWORK_ENABLED=true
     volumes:
       - ./ca/certs:/etc/ssl/certs:ro
-      - ./client/health-config.json:/etc/discovery/health-config.json:ro
+      - ./client/health-config.json:/etc/s01/health-config.json:ro
     depends_on:
-      discovery-server:
+      s01-server:
         condition: service_healthy
     networks:
-      - discovery-test-net
+      - s01-test-net
 
   client-worker-01:
     build:
       context: ./client
       dockerfile: Dockerfile
-    container_name: discovery-client-worker-01-test
+    container_name: s01-client-worker-01-test
     restart: unless-stopped
     environment:
       - SERVICE_NAME=worker-service
@@ -216,18 +216,18 @@ services:
       - HEALTH_SCORE_HEALTHY_MIN=70
     volumes:
       - ./ca/certs:/etc/ssl/certs:ro
-      - ./client/health-config.json:/etc/discovery/health-config.json:ro
+      - ./client/health-config.json:/etc/s01/health-config.json:ro
     depends_on:
-      discovery-server:
+      s01-server:
         condition: service_healthy
     networks:
-      - discovery-test-net
+      - s01-test-net
 
   client-worker-02:
     build:
       context: ./client
       dockerfile: Dockerfile
-    container_name: discovery-client-worker-02-test
+    container_name: s01-client-worker-02-test
     restart: unless-stopped
     environment:
       - SERVICE_NAME=worker-service
@@ -247,18 +247,18 @@ services:
       - HEALTH_SCORE_HEALTHY_MIN=75
     volumes:
       - ./ca/certs:/etc/ssl/certs:ro
-      - ./client/health-config.json:/etc/discovery/health-config.json:ro
+      - ./client/health-config.json:/etc/s01/health-config.json:ro
     depends_on:
-      discovery-server:
+      s01-server:
         condition: service_healthy
     networks:
-      - discovery-test-net
+      - s01-test-net
 
   test-client:
     build:
       context: ./client
       dockerfile: Dockerfile
-    container_name: discovery-test-client
+    container_name: s01-test-client
     restart: unless-stopped
     environment:
       - SERVICE_NAME=test-service
@@ -278,19 +278,19 @@ services:
       - HEALTH_SCORE_HEALTHY_MIN=80
     volumes:
       - ./ca/certs:/etc/ssl/certs:ro
-      - ./client/health-config.json:/etc/discovery/health-config.json:ro
+      - ./client/health-config.json:/etc/s01/health-config.json:ro
     depends_on:
-      discovery-server:
+      s01-server:
         condition: service_healthy
     networks:
-      - discovery-test-net
+      - s01-test-net
 
   # Load testing client that cycles through different health states
   load-test-client:
     build:
       context: ./client
       dockerfile: Dockerfile
-    container_name: discovery-load-test-client
+    container_name: s01-load-test-client
     restart: unless-stopped
     environment:
       - SERVICE_NAME=load-test-service
@@ -310,15 +310,15 @@ services:
       - HEALTH_SCORE_HEALTHY_MIN=90
     volumes:
       - ./ca/certs:/etc/ssl/certs:ro
-      - ./client/health-config.json:/etc/discovery/health-config.json:ro
+      - ./client/health-config.json:/etc/s01/health-config.json:ro
     depends_on:
-      discovery-server:
+      s01-server:
         condition: service_healthy
     networks:
-      - discovery-test-net
+      - s01-test-net
 
 networks:
-  discovery-test-net:
+  s01-test-net:
     driver: bridge
     ipam:
       config:

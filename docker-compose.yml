@@ -1,6 +1,6 @@
 version: "3.8"
 
-# Base docker-compose configuration
+# s01 base docker-compose configuration
 #
 # Usage:
 #   Development/Testing: docker-compose -f docker-compose.yml -f docker-compose.test.yml up
@@ -15,7 +15,7 @@ services:
     ports:
       - "9000:9000"
     environment:
-      - DOCKER_STEPCA_INIT_NAME=Host Discovery CA
+      - DOCKER_STEPCA_INIT_NAME=s01 CA
       - DOCKER_STEPCA_INIT_DNS_NAMES=step-ca,localhost,127.0.0.1
       - DOCKER_STEPCA_INIT_REMOTE_MANAGEMENT=true
       - DOCKER_STEPCA_INIT_ACME=false
@@ -44,7 +44,7 @@ services:
     profiles:
       - init
     environment:
-      - STEPCA_INIT_NAME=Host Discovery CA
+      - STEPCA_INIT_NAME=s01 CA
       - STEPCA_INIT_DNS_NAMES=step-ca,localhost,127.0.0.1
       - STEPCA_INIT_REMOTE_MANAGEMENT=true
       - STEPCA_INIT_PASSWORD_FILE=/home/step/secrets/password
@@ -62,7 +62,7 @@ services:
         mkdir -p /home/step/secrets;
         echo '${CA_PASSWORD:-changeme123}' > /home/step/secrets/password;
         step ca init \
-        --name='Host Discovery CA' \
+        --name='s01 CA' \
         --dns='step-ca,localhost,127.0.0.1' \
         --address=':9000' \
         --provisioner='admin' \
@@ -79,7 +79,7 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile
-    container_name: discovery-server
+    container_name: s01-server
     restart: unless-stopped
     ports:
       - "8443:8443"
@@ -94,7 +94,7 @@ services:
       - LOG_LEVEL=info
     volumes:
       - ./ca/certs:/etc/ssl/certs
-      - ./server/config:/etc/discovery
+      - ./server/config:/etc/s01
     depends_on:
       step-ca:
         condition: service_healthy

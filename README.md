@@ -1,15 +1,15 @@
-# Host Discovery Service
+# s01
 
 A secure, production-ready service discovery system with mutual TLS authentication and automatic health monitoring.
 
 ## Overview
 
-The Host Discovery Service enables secure service discovery across your infrastructure. Hosts report their status and health metrics, while other services can discover and monitor available hosts in real-time.
+s01 enables secure service discovery across your infrastructure. Hosts report their status and health metrics, while other services can discover and monitor available hosts in real-time.
 
 ```
 ┌─────────────┐    ┌──────────────┐    ┌─────────────┐
-│   step-ca   │    │   Discovery  │    │    Host     │
-│  (CA & PKI) │    │    Server    │    │   Clients   │
+│   step-ca   │    │   s01        │    │    s01      │
+│  (CA & PKI) │    │   Server     │    │   Clients   │
 │             │    │              │    │             │
 │ Issues ────────→ │ Validates    │←──── Report      │
 │ certs       │    │ requests     │    │ status      │
@@ -161,8 +161,8 @@ make cert SERVICE=my-service INSTANCE=my-instance-01
 
 ## Ports
 
-- **8443**: Discovery Server API (HTTPS, mTLS required)
-- **8080**: Health check endpoint (HTTP, no auth)
+- **8443**: s01 Server API (HTTPS, mTLS required)
+- **8080**: Health check endpoint (HTTP, no auth)  
 - **9000**: Step-CA management (HTTPS)
 
 ## Requirements
