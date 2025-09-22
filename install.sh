@@ -176,6 +176,8 @@ get_latest_version() {
         exit 1
     fi
 
+    log_debug "API Response received (first 200 chars): $(echo "$api_response" | cut -c1-200)..."
+
     # Check for API errors
     if echo "$api_response" | grep -q '"message".*"Not Found"'; then
         log_error "Repository not found: $GITHUB_REPO"
@@ -187,8 +189,24 @@ get_latest_version() {
         exit 1
     fi
 
-    local version
-    version=$(echo "$api_response" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | head -1)
+    # Try multiple approaches to extract version
+    local version=""
+
+    # Method 1: Simple grep + sed
+    version=$(echo "$api_response" | grep '"tag_name"' | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' | head -1)
+    log_debug "Method 1 result: '$version'"
+
+    # Method 2: Alternative grep approach
+    if [[ -z "$version" ]]; then
+        version=$(echo "$api_response" | grep -o '"tag_name":"[^"]*"' | cut -d'"' -f4 | head -1)
+        log_debug "Method 2 result: '$version'"
+    fi
+
+    # Method 3: Using awk
+    if [[ -z "$version" ]]; then
+        version=$(echo "$api_response" | awk -F'"' '/tag_name/ {print $4; exit}')
+        log_debug "Method 3 result: '$version'"
+    fi
 
     if [[ -z "$version" || "$version" == "null" ]]; then
         log_error "No releases found for repository: $GITHUB_REPO"
@@ -196,10 +214,11 @@ get_latest_version() {
         log_error "The repository exists but has no published releases."
         log_error "Please ask the maintainer to create a release with binaries."
         log_error "Releases page: https://github.com/$GITHUB_REPO/releases"
+        log_debug "Full API response: $api_response"
         exit 1
     fi
 
-    log_info "Found latest version: $version"
+    log_debug "Successfully extracted version: $version"
     echo "$version"
 }
 
@@ -235,7 +254,7 @@ download_binary() {
             log_error "Binary not found: $binary_name.tar.gz"
             echo
             log_error "This means:"
-            log_error "  • Release $version exists but doesn't have binaries for $arch architecture"
+            log_error "  • Release exists but doesn't have binaries for $arch architecture"
             log_error "  • Check available files at: https://github.com/$GITHUB_REPO/releases/tag/$version"
             echo
             log_error "Supported architectures are typically: amd64, arm64, arm"
@@ -255,7 +274,7 @@ download_binary() {
             echo
             log_error "Check if:"
             log_error "  • Repository exists: https://github.com/$GITHUB_REPO"
-            log_error "  • Release $version exists"
+            log_error "  • Release exists for version: $version"
             log_error "  • Internet connection is working"
             return 1
             ;;
@@ -398,7 +417,8 @@ download_with_fallback() {
 
     log_error "No compatible binary found for any architecture"
     echo
-    log_error "Tried architectures: $primary_arch${fallback_archs:+ ${fallback_archs[*]}}"
+    local tried_archs="$primary_arch${fallback_archs:+ ${fallback_archs[*]}}"
+    log_error "Tried architectures: $tried_archs"
     log_error "Check available releases: https://github.com/$GITHUB_REPO/releases/tag/$version"
     return 1
 }
@@ -667,11 +687,21 @@ main() {
     # Detect architecture
     local arch
     arch=$(detect_arch)
+    if [[ -z "$arch" ]]; then
+        log_error "Failed to detect system architecture"
+        exit 1
+    fi
     log_info "Detected architecture: $arch"
 
     # Get version
     if [[ "$VERSION" == "latest" ]]; then
+        log_info "Resolving latest version..."
         VERSION=$(get_latest_version)
+        if [[ -z "$VERSION" || "$VERSION" == "latest" ]]; then
+            log_error "Failed to resolve latest version"
+            log_error "Please specify a version with --version or check repository releases"
+            exit 1
+        fi
         log_info "Latest version: $VERSION"
     else
         log_info "Using version: $VERSION"
@@ -754,5 +784,5 @@ main() {
     return 0
 }
 
-# Run main function with all arguments
-main "$@"
+# Run main function (arguments already parsed globally)
+main
