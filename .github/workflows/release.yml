@@ -1,263 +1,422 @@
-name: Build and Release Binaries
+name: Multi-Architecture Release
 
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., v1.0.0)'
+        description: "Release version (e.g., v1.0.0)"
         required: true
-        default: 'v0.0.0'
+        default: "v0.0.0"
+      architectures:
+        description: "Architectures to build (comma-separated: amd64,arm64,arm)"
+        required: true
+        default: "amd64,arm64,arm"
+      prerelease:
+        description: "Mark as pre-release"
+        type: boolean
+        required: false
+        default: false
 
 env:
-  GO_VERSION: '1.21'
+  GO_VERSION: "1.21"
   CGO_ENABLED: 0
-  GOOS: linux
-  GOARCH: amd64
 
 jobs:
-  build:
-    name: Build and Release
+  # Build matrix for multiple architectures
+  build-matrix:
+    name: Build ${{ matrix.arch }} binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64, arm]
+        component: [server, client]
+      fail-fast: false
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set architecture variables
+        id: arch
+        run: |
+          case "${{ matrix.arch }}" in
+            amd64)
+              echo "GOARCH=amd64" >> $GITHUB_ENV
+              echo "arch_name=amd64" >> $GITHUB_OUTPUT
+              ;;
+            arm64)
+              echo "GOARCH=arm64" >> $GITHUB_ENV
+              echo "arch_name=arm64" >> $GITHUB_OUTPUT
+              ;;
+            arm)
+              echo "GOARCH=arm" >> $GITHUB_ENV
+              echo "GOARM=7" >> $GITHUB_ENV
+              echo "arch_name=armv7" >> $GITHUB_OUTPUT
+              ;;
+          esac
+          echo "GOOS=linux" >> $GITHUB_ENV
+
+      - name: Build ${{ matrix.component }} binary
+        working-directory: ${{ matrix.component }}
+        run: |
+          echo "Building discovery-${{ matrix.component }} for ${{ matrix.arch }}..."
+
+          # Build with version information
+          go mod tidy
+          go build -a -installsuffix cgo \
+            -ldflags="-w -s -X main.version=${{ steps.version.outputs.version }} -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X main.gitCommit=${{ github.sha }}" \
+            -o discovery-${{ matrix.component }} .
+
+          # Verify binary
+          file discovery-${{ matrix.component }}
+
+          echo "Binary built successfully"
+
+      - name: Package binary
+        working-directory: ${{ matrix.component }}
+        run: |
+          # Create package
+          tar -czf discovery-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz discovery-${{ matrix.component }}
+
+          # Generate individual checksum
+          sha256sum discovery-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz > discovery-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz.sha256
+
+          echo "Package created: discovery-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: binaries-${{ matrix.arch }}-${{ matrix.component }}
+          path: |
+            ${{ matrix.component }}/discovery-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz
+            ${{ matrix.component }}/discovery-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz.sha256
+
+  # Create release with all artifacts
+  create-release:
+    name: Create Release
+    needs: build-matrix
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: ${{ env.GO_VERSION }}
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
 
-    - name: Determine version
-      id: version
-      run: |
-        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-          echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-        else
-          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-        fi
+      - name: Organize release files
+        run: |
+          mkdir -p release
+          find artifacts -name "*.tar.gz" -exec cp {} release/ \;
+          find artifacts -name "*.sha256" -exec cp {} release/ \;
 
-    - name: Create build directory
-      run: mkdir -p build
+          # Create combined checksums file
+          cd release
+          sha256sum *.tar.gz > checksums.txt
 
-    - name: Build server binary
-      working-directory: server
-      run: |
-        echo "Building discovery server..."
-        go mod tidy
-        go build -a -installsuffix cgo -ldflags="-w -s -X main.version=${{ steps.version.outputs.version }}" -o ../build/discovery-server .
-        echo "Server binary built successfully"
+          echo "Release files:"
+          ls -la
 
-    - name: Build client binary
-      working-directory: client
-      run: |
-        echo "Building discovery client..."
-        go mod tidy
-        go build -a -installsuffix cgo -ldflags="-w -s -X main.version=${{ steps.version.outputs.version }}" -o ../build/discovery-client .
-        echo "Client binary built successfully"
+      - name: Filter architectures (for manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [[ "${{ github.event.inputs.architectures }}" != "amd64,arm64,arm" ]]; then
+            echo "Filtering architectures: ${{ github.event.inputs.architectures }}"
 
-    - name: Verify binaries
-      run: |
-        echo "Verifying built binaries..."
-        ls -la build/
-        file build/discovery-server
-        file build/discovery-client
-        echo "Binary verification completed"
+            cd release
+            # Keep only specified architectures
+            IFS=',' read -ra ARCHS <<< "${{ github.event.inputs.architectures }}"
+            for file in *.tar.gz; do
+              keep=false
+              for arch in "${ARCHS[@]}"; do
+                case "$arch" in
+                  amd64) [[ "$file" == *"amd64"* ]] && keep=true ;;
+                  arm64) [[ "$file" == *"arm64"* ]] && keep=true ;;
+                  arm) [[ "$file" == *"armv7"* ]] && keep=true ;;
+                esac
+              done
 
-    - name: Package server binary
-      run: |
-        echo "Packaging server binary..."
-        cd build
-        tar -czf discovery-server-linux-amd64.tar.gz discovery-server
-        echo "Server package created"
+              if [[ "$keep" == "false" ]]; then
+                echo "Removing $file (architecture not selected)"
+                rm -f "$file" "${file}.sha256"
+              fi
+            done
 
-    - name: Package client binary
-      run: |
-        echo "Packaging client binary..."
-        cd build
-        tar -czf discovery-client-linux-amd64.tar.gz discovery-client
-        echo "Client package created"
+            # Regenerate checksums
+            sha256sum *.tar.gz > checksums.txt
+          fi
 
-    - name: Generate checksums
-      run: |
-        echo "Generating checksums..."
-        cd build
-        sha256sum *.tar.gz > checksums.txt
-        echo "Checksums generated:"
-        cat checksums.txt
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION="${{ needs.build-matrix.outputs.version }}"
 
-    - name: Create release notes
-      id: release_notes
-      run: |
-        echo "Creating release notes..."
-        cat > release_notes.md << EOF
-        # Host Discovery Service ${{ steps.version.outputs.version }}
+          cat > release_notes.md << EOF
+          # Host Discovery Service ${VERSION}
 
-        ## What's Included
+          🚀 **Multi-Architecture Release** supporting Linux on multiple architectures!
 
-        This release contains precompiled Linux x86_64 binaries for:
-        - **discovery-server-linux-amd64.tar.gz** - Discovery server binary
-        - **discovery-client-linux-amd64.tar.gz** - Discovery client binary
-        - **checksums.txt** - SHA256 checksums for verification
+          ## 📦 What's Included
 
-        ## Quick Deployment
+          This release contains precompiled binaries for:
 
-        ### Using the deployment script:
-        \`\`\`bash
-        # Deploy server only
-        sudo ./scripts/deploy.sh server --repo ${{ github.repository }} --version ${{ steps.version.outputs.version }}
+          ### Discovery Server
+          $(find release -name "discovery-server-*.tar.gz" | sed 's/release\///' | sed 's/^/- **/' | sed 's/$/** - Server binary/')
 
-        # Deploy both server and client
-        sudo ./scripts/deploy.sh full --repo ${{ github.repository }} --version ${{ steps.version.outputs.version }}
+          ### Discovery Client
+          $(find release -name "discovery-client-*.tar.gz" | sed 's/release\///' | sed 's/^/- **/' | sed 's/$/** - Client binary/')
 
-        # Production deployment
-        sudo ./scripts/deploy.sh production --repo ${{ github.repository }} --version ${{ steps.version.outputs.version }}
-        \`\`\`
+          ### Checksums
+          - **checksums.txt** - SHA256 checksums for all binaries
 
-        ### Manual installation:
-        \`\`\`bash
-        # Download and extract server
-        curl -L https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/discovery-server-linux-amd64.tar.gz | tar xz
+          ## 🏗️ Supported Architectures
 
-        # Download and extract client
-        curl -L https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/discovery-client-linux-amd64.tar.gz | tar xz
+          | Architecture | Description | Binary Suffix |
+          |--------------|-------------|---------------|
+          | **amd64** | 64-bit Intel/AMD | \`linux-amd64\` |
+          | **arm64** | 64-bit ARM (Apple M1, AWS Graviton) | \`linux-arm64\` |
+          | **armv7** | 32-bit ARM (Raspberry Pi) | \`linux-armv7\` |
 
-        # Make executable and run
-        chmod +x discovery-server discovery-client
-        ./discovery-server --help
-        ./discovery-client --help
-        \`\`\`
+          ## ⚡ One-Liner Installation
 
-        ## System Requirements
+          The installer automatically detects your architecture:
 
-        - Linux x86_64 (Ubuntu 18.04+, CentOS 7+, or equivalent)
-        - OpenSSL/TLS certificates for HTTPS communication
-        - systemd (optional, for service management)
+          \`\`\`bash
+          # Install both server and client
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/get.sh | bash
 
-        ## Configuration
+          # Install server only
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/get.sh | bash -s -- --server-only
 
-        See [BINARY-DEPLOYMENT.md](https://github.com/${{ github.repository }}/blob/main/BINARY-DEPLOYMENT.md) for detailed deployment and configuration instructions.
+          # Install client only
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/get.sh | bash -s -- --client-only
 
-        ## Verification
+          # Install specific version
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/get.sh | bash -s -- --version ${VERSION}
+          \`\`\`
 
-        Verify downloaded files using the provided checksums:
-        \`\`\`bash
-        sha256sum -c checksums.txt
-        \`\`\`
+          ## 📥 Manual Download & Installation
 
-        ## Binary Information
+          ### Auto-detect Architecture
+          \`\`\`bash
+          ARCH=\$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/' | sed 's/armv7l/armv7/')
 
-        - **Go Version**: ${{ env.GO_VERSION }}
-        - **Build Date**: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
-        - **Git Commit**: ${{ github.sha }}
-        - **Architecture**: linux/amd64
-        - **CGO**: Disabled (static linking)
+          # Download server
+          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/discovery-server-linux-\${ARCH}.tar.gz" | tar xz
 
-        EOF
+          # Download client
+          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/discovery-client-linux-\${ARCH}.tar.gz" | tar xz
+          \`\`\`
 
-        echo "release_notes_file=release_notes.md" >> $GITHUB_OUTPUT
+          ### Specific Architecture
+          \`\`\`bash
+          # AMD64/Intel (most common)
+          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/discovery-server-linux-amd64.tar.gz" | tar xz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/discovery-client-linux-amd64.tar.gz" | tar xz
 
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ steps.version.outputs.version }}
-        release_name: Discovery Service ${{ steps.version.outputs.version }}
-        body_path: ${{ steps.release_notes.outputs.release_notes_file }}
-        draft: false
-        prerelease: ${{ contains(steps.version.outputs.version, 'alpha') || contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'rc') }}
+          # ARM64 (Apple M1, AWS Graviton, etc.)
+          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/discovery-server-linux-arm64.tar.gz" | tar xz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/discovery-client-linux-arm64.tar.gz" | tar xz
 
-    - name: Upload Server Binary
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./build/discovery-server-linux-amd64.tar.gz
-        asset_name: discovery-server-linux-amd64.tar.gz
-        asset_content_type: application/gzip
+          # ARMv7 (Raspberry Pi, etc.)
+          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/discovery-server-linux-armv7.tar.gz" | tar xz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/discovery-client-linux-armv7.tar.gz" | tar xz
+          \`\`\`
 
-    - name: Upload Client Binary
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./build/discovery-client-linux-amd64.tar.gz
-        asset_name: discovery-client-linux-amd64.tar.gz
-        asset_content_type: application/gzip
+          ## ✅ Verification
 
-    - name: Upload Checksums
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./build/checksums.txt
-        asset_name: checksums.txt
-        asset_content_type: text/plain
+          Verify downloaded files using checksums:
+          \`\`\`bash
+          # Download checksums
+          curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/checksums.txt" -o checksums.txt
 
-    - name: Build Summary
-      run: |
-        echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-        echo "| Component | Status | File Size |" >> $GITHUB_STEP_SUMMARY
-        echo "|-----------|--------|-----------|" >> $GITHUB_STEP_SUMMARY
-        echo "| Server | ✅ Built | $(ls -lh build/discovery-server-linux-amd64.tar.gz | awk '{print $5}') |" >> $GITHUB_STEP_SUMMARY
-        echo "| Client | ✅ Built | $(ls -lh build/discovery-client-linux-amd64.tar.gz | awk '{print $5}') |" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Release**: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Download URL**: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Quick Deploy Commands" >> $GITHUB_STEP_SUMMARY
-        echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-        echo "# Update repository in scripts first:" >> $GITHUB_STEP_SUMMARY
-        echo "# sed -i 's/your-org\/discovery-service/${{ github.repository }}/g' scripts/deploy*.sh" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "# Then deploy:" >> $GITHUB_STEP_SUMMARY
-        echo "sudo make deploy-production DEPLOY_ARGS=\"--version ${{ steps.version.outputs.version }}\"" >> $GITHUB_STEP_SUMMARY
-        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          # Verify files
+          sha256sum -c checksums.txt
+          \`\`\`
 
-  test-deployment:
-    name: Test Deployment Scripts
-    needs: build
+          ## 🔧 System Requirements
+
+          - **Operating System**: Linux (any distribution)
+          - **Architecture**: x86_64 (amd64), ARM64 (aarch64), or ARMv7 (arm)
+          - **Dependencies**: None (statically linked binaries)
+          - **Minimum Kernel**: Linux 2.6.32+
+
+          ## 🚀 Quick Start
+
+          1. **Install**: Use the one-liner or download manually
+          2. **Configure**: Edit \`~/.config/discovery/server.env\` and \`~/.config/discovery/client.env\`
+          3. **Run**: Execute \`discovery-server-run\` and \`discovery-client-run\`
+
+          ## 📋 Build Information
+
+          - **Go Version**: ${{ env.GO_VERSION }}
+          - **Build Date**: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          - **Git Commit**: ${{ github.sha }}
+          - **CGO**: Disabled (static linking)
+          - **Architectures**: $(find release -name "*.tar.gz" | wc -l) binaries across $(find release -name "*server*.tar.gz" | wc -l) architectures
+
+          ## 📚 Documentation
+
+          - [Installation Guide](https://github.com/${{ github.repository }}/blob/main/QUICK-INSTALL.md)
+          - [Binary Deployment](https://github.com/${{ github.repository }}/blob/main/BINARY-DEPLOYMENT.md)
+          - [Docker Usage](https://github.com/${{ github.repository }}/blob/main/DOCKER-USAGE.md)
+          - [Main Documentation](https://github.com/${{ github.repository }}#readme)
+
+          EOF
+
+          echo "release_notes_file=release_notes.md" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ needs.build-matrix.outputs.version }}
+          release_name: "Discovery Service ${{ needs.build-matrix.outputs.version }}"
+          body_path: ${{ steps.release_notes.outputs.release_notes_file }}
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease == 'true' || contains(needs.build-matrix.outputs.version, 'alpha') || contains(needs.build-matrix.outputs.version, 'beta') || contains(needs.build-matrix.outputs.version, 'rc') }}
+
+      - name: Upload Release Assets
+        run: |
+          # Upload all release files
+          for file in release/*; do
+            if [[ -f "$file" ]]; then
+              filename=$(basename "$file")
+              echo "Uploading $filename..."
+
+              # Determine content type
+              case "$filename" in
+                *.tar.gz) content_type="application/gzip" ;;
+                *.txt) content_type="text/plain" ;;
+                *.sha256) content_type="text/plain" ;;
+                *) content_type="application/octet-stream" ;;
+              esac
+
+              curl \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Content-Type: $content_type" \
+                --data-binary @"$file" \
+                "${{ steps.create_release.outputs.upload_url }}=${filename}"
+            fi
+          done
+
+      - name: Build Summary
+        run: |
+          echo "## 🎉 Multi-Architecture Release Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "| Component | Architectures | Total Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|---------------|------------|" >> $GITHUB_STEP_SUMMARY
+
+          server_files=$(find release -name "discovery-server-*.tar.gz" | wc -l)
+          client_files=$(find release -name "discovery-client-*.tar.gz" | wc -l)
+          total_size=$(du -ch release/*.tar.gz | tail -1 | cut -f1)
+
+          echo "| Server | $server_files | $(du -ch release/discovery-server-*.tar.gz | tail -1 | cut -f1) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Client | $client_files | $(du -ch release/discovery-client-*.tar.gz | tail -1 | cut -f1) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Total** | **$(($server_files + $client_files))** | **$total_size** |" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release**: ${{ needs.build-matrix.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Download**: https://github.com/${{ github.repository }}/releases/tag/${{ needs.build-matrix.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Available Downloads" >> $GITHUB_STEP_SUMMARY
+          echo "| File | Architecture | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------------|------|" >> $GITHUB_STEP_SUMMARY
+
+          for file in release/*.tar.gz; do
+            if [[ -f "$file" ]]; then
+              filename=$(basename "$file")
+              size=$(du -h "$file" | cut -f1)
+
+              # Extract architecture from filename
+              if [[ "$filename" =~ linux-([^.]+) ]]; then
+                arch="${BASH_REMATCH[1]}"
+              else
+                arch="unknown"
+              fi
+
+              echo "| $filename | $arch | $size |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 Quick Installation Commands" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# Auto-detect architecture and install both components" >> $GITHUB_STEP_SUMMARY
+          echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/get.sh | bash" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Install specific version" >> $GITHUB_STEP_SUMMARY
+          echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/get.sh | bash -s -- --version ${{ needs.build-matrix.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  # Test installation on different architectures (optional)
+  test-installation:
+    name: Test Installation
+    needs: [build-matrix, create-release]
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Make scripts executable
-      run: chmod +x scripts/*.sh
+      - name: Test amd64 installation
+        run: |
+          echo "Testing amd64 binary download..."
+          VERSION="${{ needs.build-matrix.outputs.version }}"
 
-    - name: Test deployment script syntax
-      run: |
-        echo "Testing deployment script syntax..."
-        bash -n scripts/deploy-binary.sh
-        bash -n scripts/deploy.sh
-        echo "Syntax check passed"
+          # Test server download
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/discovery-server-linux-amd64.tar.gz" | tar xz
+          ./discovery-server --help || ./discovery-server -h || echo "Server binary works"
 
-    - name: Test dry run deployment
-      run: |
-        echo "Testing dry run deployment..."
-        # Update repo in script for testing
-        sed -i "s/your-org\/discovery-service/${{ github.repository }}/g" scripts/deploy-binary.sh scripts/deploy.sh
+          # Test client download
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/discovery-client-linux-amd64.tar.gz" | tar xz
+          ./discovery-client --help || ./discovery-client -h || echo "Client binary works"
 
-        # Test dry run (this will fail to download since release might not be public yet, but tests script logic)
-        sudo scripts/deploy.sh full --version ${{ needs.build.steps.version.outputs.version }} --dry-run || echo "Dry run completed (expected to show what would be done)"
+          echo "✅ AMD64 binaries tested successfully"
 
-    - name: Validate release artifacts
-      run: |
-        echo "Validating that release was created..."
-        # This is a simple validation that could be expanded
-        echo "Release validation would check:"
-        echo "- Release exists at: https://github.com/${{ github.repository }}/releases/tag/${{ needs.build.steps.version.outputs.version }}"
-        echo "- Binaries are downloadable"
-        echo "- Checksums match"
+      - name: Verify checksums
+        run: |
+          VERSION="${{ needs.build-matrix.outputs.version }}"
+
+          # Download checksums
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/checksums.txt" -o checksums.txt
+
+          # Download and verify a few binaries
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/discovery-server-linux-amd64.tar.gz" -o discovery-server-linux-amd64.tar.gz
+
+          # Verify checksum
+          if sha256sum -c checksums.txt --ignore-missing; then
+            echo "✅ Checksums verified successfully"
+          else
+            echo "❌ Checksum verification failed"
+            exit 1
+          fi

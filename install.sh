@@ -5,8 +5,8 @@ set -euo pipefail
 # Usage: curl -fsSL https://raw.githubusercontent.com/YOUR_ORG/YOUR_REPO/main/install.sh | bash
 # Or:    wget -qO- https://raw.githubusercontent.com/YOUR_ORG/YOUR_REPO/main/install.sh | bash
 
-# Configuration - UPDATE THESE VALUES FOR YOUR REPOSITORY
-GITHUB_REPO="${DISCOVERY_REPO:-your-org/discovery-service}"
+# Configuration
+GITHUB_REPO="${DISCOVERY_REPO:-k1t-ops/s01}"
 DEFAULT_VERSION="latest"
 INSTALL_PREFIX="/usr/local"
 CONFIG_DIR="$HOME/.config/discovery"
