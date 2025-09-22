@@ -1,4 +1,4 @@
-name: Multi-Architecture Release
+name: Build and Release Binaries
 
 on:
   push:
@@ -45,7 +45,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -106,7 +106,7 @@ jobs:
           echo "Package created: discovery-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz"
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.arch }}-${{ matrix.component }}
           path: |
@@ -118,13 +118,15 @@ jobs:
     name: Create Release
     needs: build-matrix
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
 
@@ -288,43 +290,21 @@ jobs:
 
           EOF
 
-          echo "release_notes_file=release_notes.md" >> $GITHUB_OUTPUT
-
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.build-matrix.outputs.version }}
-          release_name: "Discovery Service ${{ needs.build-matrix.outputs.version }}"
-          body_path: ${{ steps.release_notes.outputs.release_notes_file }}
+          name: "Discovery Service ${{ needs.build-matrix.outputs.version }}"
+          body_path: release_notes.md
           draft: false
           prerelease: ${{ github.event.inputs.prerelease == 'true' || contains(needs.build-matrix.outputs.version, 'alpha') || contains(needs.build-matrix.outputs.version, 'beta') || contains(needs.build-matrix.outputs.version, 'rc') }}
-
-      - name: Upload Release Assets
-        run: |
-          # Upload all release files
-          for file in release/*; do
-            if [[ -f "$file" ]]; then
-              filename=$(basename "$file")
-              echo "Uploading $filename..."
-
-              # Determine content type
-              case "$filename" in
-                *.tar.gz) content_type="application/gzip" ;;
-                *.txt) content_type="text/plain" ;;
-                *.sha256) content_type="text/plain" ;;
-                *) content_type="application/octet-stream" ;;
-              esac
-
-              curl \
-                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                -H "Content-Type: $content_type" \
-                --data-binary @"$file" \
-                "${{ steps.create_release.outputs.upload_url }}=${filename}"
-            fi
-          done
+          files: |
+            release/*.tar.gz
+            release/*.sha256
+            release/checksums.txt
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Summary
         run: |
@@ -336,10 +316,10 @@ jobs:
 
           server_files=$(find release -name "discovery-server-*.tar.gz" | wc -l)
           client_files=$(find release -name "discovery-client-*.tar.gz" | wc -l)
-          total_size=$(du -ch release/*.tar.gz | tail -1 | cut -f1)
+          total_size=$(du -ch release/*.tar.gz 2>/dev/null | tail -1 | cut -f1 || echo "N/A")
 
-          echo "| Server | $server_files | $(du -ch release/discovery-server-*.tar.gz | tail -1 | cut -f1) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Client | $client_files | $(du -ch release/discovery-client-*.tar.gz | tail -1 | cut -f1) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Server | $server_files | $(du -ch release/discovery-server-*.tar.gz 2>/dev/null | tail -1 | cut -f1 || echo "N/A") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Client | $client_files | $(du -ch release/discovery-client-*.tar.gz 2>/dev/null | tail -1 | cut -f1 || echo "N/A") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Total** | **$(($server_files + $client_files))** | **$total_size** |" >> $GITHUB_STEP_SUMMARY
 
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -393,13 +373,32 @@ jobs:
           echo "Testing amd64 binary download..."
           VERSION="${{ needs.build-matrix.outputs.version }}"
 
+          # Wait a moment for release to be available
+          sleep 30
+
           # Test server download
-          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/discovery-server-linux-amd64.tar.gz" | tar xz
-          ./discovery-server --help || ./discovery-server -h || echo "Server binary works"
+          if curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/discovery-server-linux-amd64.tar.gz" | tar xz; then
+            if ./discovery-server --help >/dev/null 2>&1 || ./discovery-server -h >/dev/null 2>&1; then
+              echo "✅ Server binary works"
+            else
+              echo "⚠️ Server binary downloaded but help command failed"
+            fi
+          else
+            echo "❌ Failed to download server binary"
+            exit 1
+          fi
 
           # Test client download
-          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/discovery-client-linux-amd64.tar.gz" | tar xz
-          ./discovery-client --help || ./discovery-client -h || echo "Client binary works"
+          if curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/discovery-client-linux-amd64.tar.gz" | tar xz; then
+            if ./discovery-client --help >/dev/null 2>&1 || ./discovery-client -h >/dev/null 2>&1; then
+              echo "✅ Client binary works"
+            else
+              echo "⚠️ Client binary downloaded but help command failed"
+            fi
+          else
+            echo "❌ Failed to download client binary"
+            exit 1
+          fi
 
           echo "✅ AMD64 binaries tested successfully"
 
@@ -408,15 +407,23 @@ jobs:
           VERSION="${{ needs.build-matrix.outputs.version }}"
 
           # Download checksums
-          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/checksums.txt" -o checksums.txt
-
-          # Download and verify a few binaries
-          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/discovery-server-linux-amd64.tar.gz" -o discovery-server-linux-amd64.tar.gz
-
-          # Verify checksum
-          if sha256sum -c checksums.txt --ignore-missing; then
-            echo "✅ Checksums verified successfully"
+          if curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/checksums.txt" -o checksums.txt; then
+            echo "✅ Checksums downloaded"
           else
-            echo "❌ Checksum verification failed"
+            echo "❌ Failed to download checksums"
+            exit 1
+          fi
+
+          # Download and verify a binary
+          if curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/discovery-server-linux-amd64.tar.gz" -o discovery-server-linux-amd64.tar.gz; then
+            # Verify checksum
+            if sha256sum -c checksums.txt --ignore-missing; then
+              echo "✅ Checksums verified successfully"
+            else
+              echo "❌ Checksum verification failed"
+              exit 1
+            fi
+          else
+            echo "❌ Failed to download binary for checksum verification"
             exit 1
           fi
