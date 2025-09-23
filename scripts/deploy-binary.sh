@@ -1,21 +1,21 @@
 #!/bin/bash
 set -euo pipefail
 
-# Deploy script for Host Discovery Service precompiled binaries
+# Deploy script for Host S01 Service precompiled binaries
 # Downloads and installs server and/or client binaries from GitHub releases
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-DEFAULT_REPO="${DISCOVERY_REPO:-your-org/discovery-service}"  # Set DISCOVERY_REPO env var or update this default
+DEFAULT_REPO="${S01_REPO:-your-org/s01-service}"  # Set S01_REPO env var or update this default
 DEFAULT_VERSION="latest"
-DEFAULT_INSTALL_DIR="/opt/discovery"
-DEFAULT_CONFIG_DIR="/etc/discovery"
-DEFAULT_CERT_DIR="/etc/ssl/discovery"
-DEFAULT_DATA_DIR="/var/lib/discovery"
-DEFAULT_LOG_DIR="/var/log/discovery"
-DEFAULT_USER="discovery"
-DEFAULT_GROUP="discovery"
+DEFAULT_INSTALL_DIR="/opt/s01"
+DEFAULT_CONFIG_DIR="/etc/s01"
+DEFAULT_CERT_DIR="/etc/ssl/s01"
+DEFAULT_DATA_DIR="/var/lib/s01"
+DEFAULT_LOG_DIR="/var/log/s01"
+DEFAULT_USER="s01"
+DEFAULT_GROUP="s01"
 
 # Colors for output
 RED='\033[0;31m'
@@ -48,13 +48,13 @@ usage() {
     cat << EOF
 Usage: $0 [OPTIONS]
 
-Deploy Host Discovery Service precompiled binaries from GitHub releases
+Deploy Host S01 Service precompiled binaries from GitHub releases
 
 OPTIONS:
     -r, --repo REPO         GitHub repository (default: $DEFAULT_REPO)
     -v, --version VERSION   Version to deploy (default: $DEFAULT_VERSION)
-    -s, --server           Deploy discovery server
-    -c, --client           Deploy discovery client
+    -s, --server           Deploy s01 server
+    -c, --client           Deploy s01 client
     -a, --all              Deploy both server and client
     -i, --install-dir DIR   Installation directory (default: $DEFAULT_INSTALL_DIR)
     --config-dir DIR       Configuration directory (default: $DEFAULT_CONFIG_DIR)
@@ -72,22 +72,22 @@ OPTIONS:
 
 EXAMPLES:
     # Deploy server only
-    $0 --server --repo myorg/discovery-service --version v1.2.3
+    $0 --server --repo myorg/s01-service --version v1.2.3
 
     # Deploy both server and client
     $0 --all --version latest
 
     # Deploy client with custom directories
-    $0 --client --install-dir /usr/local/discovery --config-dir /usr/local/etc/discovery
+    $0 --client --install-dir /usr/local/s01 --config-dir /usr/local/etc/s01
 
     # Dry run to see what would be deployed
     $0 --all --dry-run
 
     # Use environment variable for repo
-    DISCOVERY_REPO=myorg/discovery-service $0 --all
+    S01_REPO=myorg/s01-service $0 --all
 
 ENVIRONMENT VARIABLES:
-    DISCOVERY_REPO  GitHub repository (overrides default)
+    S01_REPO  GitHub repository (overrides default)
     GITHUB_TOKEN    GitHub token for private repositories
     DEBUG           Enable debug output (true/false)
 
@@ -259,7 +259,7 @@ download_binary() {
     fi
 
     # Construct download URL - adjust this based on your release naming convention
-    local binary_name="discovery-${component}-linux-amd64"
+    local binary_name="s01-${component}-linux-amd64"
     local download_url="https://github.com/$REPO/releases/download/$version/$binary_name.tar.gz"
 
     log_debug "Download URL: $download_url"
@@ -279,15 +279,15 @@ download_binary() {
 
         # Find the actual binary (it might be in a subdirectory)
         local binary_path
-        binary_path=$(find . -name "discovery-${component}" -type f -executable | head -1)
+        binary_path=$(find . -name "s01-${component}" -type f -executable | head -1)
 
         if [[ -z "$binary_path" ]]; then
-            log_error "Could not find discovery-${component} executable in downloaded archive"
+            log_error "Could not find s01-${component} executable in downloaded archive"
             return 1
         fi
 
-        mv "$binary_path" "discovery-${component}"
-        chmod +x "discovery-${component}"
+        mv "$binary_path" "s01-${component}"
+        chmod +x "s01-${component}"
     fi
 
     log_info "$component binary downloaded successfully"
@@ -309,7 +309,7 @@ create_user() {
 
     if ! getent passwd "$SERVICE_USER" >/dev/null 2>&1; then
         useradd --system --gid "$SERVICE_GROUP" --home-dir "$DATA_DIR" \
-                --shell /bin/false --comment "Discovery Service" "$SERVICE_USER"
+                --shell /bin/false --comment "S01 Service" "$SERVICE_USER"
         log_info "Created user: $SERVICE_USER"
     fi
 }
@@ -337,7 +337,7 @@ install_binary() {
 
     log_info "Installing $component binary..."
 
-    local binary_path="$INSTALL_DIR/discovery-$component"
+    local binary_path="$INSTALL_DIR/s01-$component"
 
     if [[ -f "$binary_path" ]] && [[ "$FORCE" == false ]]; then
         log_error "$component binary already exists at $binary_path (use --force to overwrite)"
@@ -349,7 +349,7 @@ install_binary() {
         return 0
     fi
 
-    cp "$temp_dir/discovery-$component" "$binary_path"
+    cp "$temp_dir/s01-$component" "$binary_path"
     chown "$SERVICE_USER:$SERVICE_GROUP" "$binary_path"
     chmod 755 "$binary_path"
 
@@ -375,7 +375,7 @@ create_config_files() {
 
     if [[ "$component" == "server" ]]; then
         cat > "$config_file" << EOF
-# Discovery Server Configuration
+# S01 Server Configuration
 SERVER_PORT=8443
 HEALTH_PORT=8080
 MAX_HISTORY=1000
@@ -389,7 +389,7 @@ DATA_DIR=$DATA_DIR
 EOF
     elif [[ "$component" == "client" ]]; then
         cat > "$config_file" << EOF
-# Discovery Client Configuration
+# S01 Client Configuration
 SERVICE_NAME=my-service
 INSTANCE_NAME=\$(hostname)
 SERVER_URL=https://localhost:8443
@@ -426,8 +426,8 @@ create_systemd_service() {
 
     log_info "Creating systemd service for $component..."
 
-    local service_file="/etc/systemd/system/discovery-$component.service"
-    local binary_path="$INSTALL_DIR/discovery-$component"
+    local service_file="/etc/systemd/system/s01-$component.service"
+    local binary_path="$INSTALL_DIR/s01-$component"
     local config_file="$CONFIG_DIR/$component.conf"
 
     if [[ "$DRY_RUN" == true ]]; then
@@ -435,19 +435,19 @@ create_systemd_service() {
         return 0
     fi
 
-    local description="Host Discovery Service"
+    local description="Host S01 Service"
     local after_service=""
     local wants_service=""
 
     if [[ "$component" == "server" ]]; then
-        description="Host Discovery Server"
+        description="Host S01 Server"
         after_service="network.target"
     elif [[ "$component" == "client" ]]; then
-        description="Host Discovery Client"
+        description="Host S01 Client"
         after_service="network.target"
         if [[ "$DEPLOY_SERVER" == true ]]; then
-            wants_service="discovery-server.service"
-            after_service="network.target discovery-server.service"
+            wants_service="s01-server.service"
+            after_service="network.target s01-server.service"
         fi
     fi
 
@@ -467,7 +467,7 @@ EnvironmentFile=$config_file
 WorkingDirectory=$DATA_DIR
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=discovery-$component
+SyslogIdentifier=s01-$component
 Restart=always
 RestartSec=10
 TimeoutStopSec=30
@@ -498,11 +498,11 @@ EOF
     log_info "Systemd service created: $service_file"
 
     if [[ "$component" == "server" ]]; then
-        log_info "To start the server: systemctl start discovery-server"
-        log_info "To enable on boot: systemctl enable discovery-server"
+        log_info "To start the server: systemctl start s01-server"
+        log_info "To enable on boot: systemctl enable s01-server"
     elif [[ "$component" == "client" ]]; then
-        log_info "To start the client: systemctl start discovery-client"
-        log_info "To enable on boot: systemctl enable discovery-client"
+        log_info "To start the client: systemctl start s01-client"
+        log_info "To enable on boot: systemctl enable s01-client"
     fi
 }
 
@@ -548,15 +548,15 @@ setup_certificates() {
     done
 
     cat > "$CERT_DIR/README.txt" << EOF
-Certificate Directory for Discovery Service
+Certificate Directory for S01 Service
 
 This directory should contain the following certificate files:
 
 ca.crt      - Certificate Authority root certificate
-server.crt  - Server certificate (for discovery-server)
-server.key  - Server private key (for discovery-server)
-client.crt  - Client certificate (for discovery-client)
-client.key  - Client private key (for discovery-client)
+server.crt  - Server certificate (for s01-server)
+server.key  - Server private key (for s01-server)
+client.crt  - Client certificate (for s01-client)
+client.key  - Client private key (for s01-client)
 
 Please obtain proper certificates from your CA before starting the services.
 
@@ -596,18 +596,18 @@ print_summary() {
     echo
 
     if [[ "$DEPLOY_SERVER" == true ]]; then
-        echo "Server binary: $INSTALL_DIR/discovery-server"
+        echo "Server binary: $INSTALL_DIR/s01-server"
         echo "Server config: $CONFIG_DIR/server.conf"
         if [[ "$SETUP_SYSTEMD" == true ]]; then
-            echo "Server service: discovery-server.service"
+            echo "Server service: s01-server.service"
         fi
     fi
 
     if [[ "$DEPLOY_CLIENT" == true ]]; then
-        echo "Client binary: $INSTALL_DIR/discovery-client"
+        echo "Client binary: $INSTALL_DIR/s01-client"
         echo "Client config: $CONFIG_DIR/client.conf"
         if [[ "$SETUP_SYSTEMD" == true ]]; then
-            echo "Client service: discovery-client.service"
+            echo "Client service: s01-client.service"
         fi
     fi
 
@@ -619,15 +619,15 @@ print_summary() {
 
     if [[ "$SETUP_SYSTEMD" == true ]]; then
         if [[ "$DEPLOY_SERVER" == true ]]; then
-            echo "3. Start server: systemctl start discovery-server"
-            echo "4. Enable server on boot: systemctl enable discovery-server"
+            echo "3. Start server: systemctl start s01-server"
+            echo "4. Enable server on boot: systemctl enable s01-server"
         fi
         if [[ "$DEPLOY_CLIENT" == true ]]; then
-            echo "3. Start client: systemctl start discovery-client"
-            echo "4. Enable client on boot: systemctl enable discovery-client"
+            echo "3. Start client: systemctl start s01-client"
+            echo "4. Enable client on boot: systemctl enable s01-client"
         fi
-        echo "5. Check status: systemctl status discovery-server discovery-client"
-        echo "6. View logs: journalctl -u discovery-server -u discovery-client -f"
+        echo "5. Check status: systemctl status s01-server s01-client"
+        echo "6. View logs: journalctl -u s01-server -u s01-client -f"
     else
         echo "3. Start services manually using the installed binaries"
     fi
@@ -635,7 +635,7 @@ print_summary() {
 
 # Main execution
 main() {
-    log_info "Starting deployment of Discovery Service binaries..."
+    log_info "Starting deployment of S01 Service binaries..."
     log_debug "Repository: $REPO"
     log_debug "Version: $VERSION"
     log_debug "Deploy Server: $DEPLOY_SERVER"

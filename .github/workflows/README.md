@@ -1,6 +1,6 @@
 # GitHub Workflows
 
-This directory contains automated GitHub Actions workflows for building and releasing the Host Discovery Service.
+This directory contains automated GitHub Actions workflows for building and releasing the S01 Service.
 
 ## Available Workflows
 
@@ -13,12 +13,12 @@ This directory contains automated GitHub Actions workflows for building and rele
 - Manual dispatch via GitHub Actions UI
 
 **What it builds**:
-- `discovery-server-linux-amd64.tar.gz`
-- `discovery-server-linux-arm64.tar.gz`
-- `discovery-server-linux-armv7.tar.gz`
-- `discovery-client-linux-amd64.tar.gz`
-- `discovery-client-linux-arm64.tar.gz`
-- `discovery-client-linux-armv7.tar.gz`
+- `s01-server-linux-amd64.tar.gz`
+- `s01-server-linux-arm64.tar.gz`
+- `s01-server-linux-armv7.tar.gz`
+- `s01-client-linux-amd64.tar.gz`
+- `s01-client-linux-arm64.tar.gz`
+- `s01-client-linux-armv7.tar.gz`
 - `checksums.txt` - SHA256 checksums for all files
 
 **Usage**:
@@ -40,8 +40,8 @@ git push origin v1.0.0
 - Manual dispatch via GitHub Actions UI
 
 **What it builds**:
-- `discovery-server-linux-amd64.tar.gz`
-- `discovery-client-linux-amd64.tar.gz`
+- `s01-server-linux-amd64.tar.gz`
+- `s01-client-linux-amd64.tar.gz`
 - `checksums.txt`
 
 **Usage**:
@@ -124,7 +124,7 @@ All binaries are built with:
 ```bash
 go build -a -installsuffix cgo \
   -ldflags="-w -s -X main.version=$VERSION" \
-  -o discovery-$COMPONENT .
+  -o s01-$COMPONENT .
 ```
 
 - `-a`: Force rebuilding of packages
@@ -143,12 +143,12 @@ After a successful workflow run, the following will be available:
 
 ### **Binary Naming Convention**
 ```
-discovery-{component}-linux-{architecture}.tar.gz
+s01-{component}-linux-{architecture}.tar.gz
 
 Examples:
-- discovery-server-linux-amd64.tar.gz
-- discovery-client-linux-arm64.tar.gz
-- discovery-server-linux-armv7.tar.gz
+- s01-server-linux-amd64.tar.gz
+- s01-client-linux-arm64.tar.gz
+- s01-server-linux-armv7.tar.gz
 ```
 
 ### **One-Liner Installer Compatibility**
@@ -206,15 +206,15 @@ Before pushing tags, test the build process locally:
 ```bash
 # Test server build
 cd server
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o discovery-server .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o s01-server .
 
 # Test client build
-cd ../client  
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o discovery-client .
+cd ../client
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o s01-client .
 
 # Test binaries
-./server/discovery-server --help
-./client/discovery-client --help
+./server/s01-server --help
+./client/s01-client --help
 ```
 
 ## Customization
@@ -239,7 +239,7 @@ Modify the build command in the workflow to add custom flags:
 ```yaml
 go build -a -installsuffix cgo \
   -ldflags="-w -s -X main.version=$VERSION -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  -o discovery-$component .
+  -o s01-$component .
 ```
 
 ### **Additional Components**

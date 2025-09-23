@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Configuration script for Host Discovery Service deployment
+# Configuration script for S01 Service deployment
 # This script helps set up repository settings for binary deployment
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,7 +32,7 @@ log_debug() {
 
 print_header() {
     echo "======================================================"
-    echo "   Host Discovery Service - Deployment Configuration"
+    echo "        S01 Service - Deployment Configuration        "
     echo "======================================================"
     echo
 }
@@ -41,7 +41,7 @@ usage() {
     cat << EOF
 Usage: $0 [OPTIONS]
 
-Configure deployment settings for Host Discovery Service
+Configure deployment settings for S01 Service
 
 OPTIONS:
     --repo REPO         Set GitHub repository (e.g., myorg/discovery-service)
@@ -178,7 +178,7 @@ create_env_file() {
     log_info "Creating environment file: $env_file"
 
     cat > "$env_file" << EOF
-# Host Discovery Service Deployment Configuration
+# S01 Service Deployment Configuration
 # Source this file before running deployment commands:
 #   source .env.deployment && make deploy-production
 

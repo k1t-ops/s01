@@ -77,7 +77,7 @@ type HostResponse struct {
 	ClientCN      string         `json:"client_cn,omitempty"`
 }
 
-type DiscoveryServer struct {
+type S01Server struct {
 	hosts      map[string]*HostHistory // key: service_name:instance_name
 	maxHistory int
 	mutex      sync.RWMutex
@@ -115,14 +115,14 @@ type DiscoveryResponse struct {
 	Total int            `json:"total"`
 }
 
-// NewDiscoveryServer creates a new discovery server instance
-func NewDiscoveryServer(config *Config, logger *slog.Logger) (*DiscoveryServer, error) {
+// NewS01Server creates a new s01 server instance
+func NewS01Server(config *Config, logger *slog.Logger) (*S01Server, error) {
 	tlsConfig, err := setupTLSConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup TLS: %v", err)
 	}
 
-	return &DiscoveryServer{
+	return &S01Server{
 		hosts:      make(map[string]*HostHistory),
 		maxHistory: config.MaxHistory,
 		logger:     logger,
@@ -244,7 +244,7 @@ func matchesPattern(path, pattern string) bool {
 }
 
 // reportStatus handles incoming status reports from hosts
-func (ds *DiscoveryServer) reportStatus(w http.ResponseWriter, r *http.Request) {
+func (ds *S01Server) reportStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -315,7 +315,7 @@ func (ds *DiscoveryServer) reportStatus(w http.ResponseWriter, r *http.Request) 
 }
 
 // addHostStatus adds a new status report to the host history
-func (ds *DiscoveryServer) addHostStatus(status HostStatus) {
+func (ds *S01Server) addHostStatus(status HostStatus) {
 	key := fmt.Sprintf("%s:%s", status.ServiceName, status.InstanceName)
 
 	ds.mutex.Lock()
@@ -346,7 +346,7 @@ func (ds *DiscoveryServer) addHostStatus(status HostStatus) {
 }
 
 // getHosts returns all known hosts
-func (ds *DiscoveryServer) getHosts(w http.ResponseWriter, r *http.Request) {
+func (ds *S01Server) getHosts(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -406,7 +406,7 @@ func (ds *DiscoveryServer) getHosts(w http.ResponseWriter, r *http.Request) {
 }
 
 // getHostByName returns a specific host by service_name and instance_name
-func (ds *DiscoveryServer) getHostByName(w http.ResponseWriter, r *http.Request) {
+func (ds *S01Server) getHostByName(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -455,7 +455,7 @@ func (ds *DiscoveryServer) getHostByName(w http.ResponseWriter, r *http.Request)
 }
 
 // health provides a health check endpoint
-func (ds *DiscoveryServer) health(w http.ResponseWriter, r *http.Request) {
+func (ds *S01Server) health(w http.ResponseWriter, r *http.Request) {
 	ds.mutex.RLock()
 	totalHosts := len(ds.hosts)
 	ds.mutex.RUnlock()
@@ -472,7 +472,7 @@ func (ds *DiscoveryServer) health(w http.ResponseWriter, r *http.Request) {
 }
 
 // router handles HTTP routing manually
-func (ds *DiscoveryServer) router(w http.ResponseWriter, r *http.Request) {
+func (ds *S01Server) router(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
 	switch {
@@ -490,7 +490,7 @@ func (ds *DiscoveryServer) router(w http.ResponseWriter, r *http.Request) {
 }
 
 // healthRouter handles health check requests without requiring client certificates
-func (ds *DiscoveryServer) healthRouter(w http.ResponseWriter, r *http.Request) {
+func (ds *S01Server) healthRouter(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/health" {
 		ds.health(w, r)
 	} else {
@@ -498,8 +498,8 @@ func (ds *DiscoveryServer) healthRouter(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// Start starts the discovery server
-func (ds *DiscoveryServer) Start() error {
+// Start starts the s01 server
+func (ds *S01Server) Start() error {
 	// Main mTLS server
 	server := &http.Server{
 		Addr:         ":" + ds.config.ServerPort,
@@ -519,7 +519,7 @@ func (ds *DiscoveryServer) Start() error {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	ds.logger.Info("Starting discovery server with mTLS", "port", ds.config.ServerPort)
+	ds.logger.Info("Starting s01 server with mTLS", "port", ds.config.ServerPort)
 	ds.logger.Info("Starting health check server", "port", ds.config.HealthPort)
 
 	// Start main server in goroutine
@@ -606,7 +606,7 @@ func loadConfig() (*Config, error) {
 
 	// Try to read config file if it exists
 	configPaths := []string{
-		"/etc/discovery/config.json",
+		"/etc/s01/config.json",
 		"./config/config.json",
 		"./config.json",
 	}
@@ -672,13 +672,13 @@ func main() {
 
 	logger := setupLogger(config.LogLevel)
 
-	server, err := NewDiscoveryServer(config, logger)
+	server, err := NewS01Server(config, logger)
 	if err != nil {
-		logger.Error("Failed to create discovery server", "error", err)
+		logger.Error("Failed to create s01 server", "error", err)
 		os.Exit(1)
 	}
 
-	logger.Info("Discovery server configuration loaded",
+	logger.Info("S01 server configuration loaded",
 		"port", config.ServerPort,
 		"max_history", config.MaxHistory,
 		"cert_file", filepath.Base(config.CertFile),

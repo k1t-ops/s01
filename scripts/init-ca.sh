@@ -9,11 +9,11 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
-CA_NAME="Host Discovery CA"
+CA_NAME="Host S01 CA"
 CA_PASSWORD="${CA_PASSWORD:-changeme123}"
 CA_URL="https://localhost:9000"
-SERVER_NAME="discovery-server"
-SERVER_DNS="localhost,discovery-server,127.0.0.1"
+SERVER_NAME="s01-server"
+SERVER_DNS="localhost,s01-server,127.0.0.1"
 
 # Directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,7 +23,7 @@ STEP_DIR="$CA_DIR/step"
 CERTS_DIR="$CA_DIR/certs"
 CONFIG_DIR="$CA_DIR/config"
 
-echo -e "${GREEN}Initializing Host Discovery CA...${NC}"
+echo -e "${GREEN}Initializing Host S01 CA...${NC}"
 
 # Create directories
 mkdir -p "$STEP_DIR/secrets" "$CERTS_DIR" "$CONFIG_DIR"
@@ -73,7 +73,7 @@ fi
 # Skip bootstrap and provisioner setup for demo - not required for basic functionality
 echo -e "${YELLOW}Skipping step CLI bootstrap (not required for demo)...${NC}"
 
-# Generate server certificate for discovery service
+# Generate server certificate for s01 service
 echo -e "${YELLOW}Generating server certificate...${NC}"
 docker-compose -f "$PROJECT_DIR/docker-compose.yml" exec -T step-ca step ca certificate \
     "$SERVER_NAME" \
@@ -168,10 +168,10 @@ echo -e "  ${YELLOW}Test client cert:${NC} $CERTS_DIR/test-client.crt"
 echo -e "  ${YELLOW}Test client key:${NC} $CERTS_DIR/test-client.key"
 echo ""
 echo -e "${GREEN}Next steps:${NC}"
-echo -e "1. Build and start the discovery server: ${YELLOW}docker-compose up -d discovery-server${NC}"
+echo -e "1. Build and start the s01 server: ${YELLOW}docker-compose up -d s01-server${NC}"
 echo -e "2. Start test client: ${YELLOW}docker-compose --profile test up -d test-client${NC}"
 echo -e "3. Start demo clients: ${YELLOW}docker-compose --profile demo up -d${NC}"
-echo -e "4. Test with: ${YELLOW}./scripts/test-discovery.sh${NC}"
+echo -e "4. Test with: ${YELLOW}./scripts/test-s01.sh${NC}"
 echo -e "5. Monitor health: ${YELLOW}make health-monitor${NC}"
 echo -e "6. Generate client certificates for your hosts using the step CLI"
 echo ""

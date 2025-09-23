@@ -107,7 +107,7 @@ services:
     environment:
       - SERVICE_NAME=web-service
       - INSTANCE_NAME=web-01-test
-      - SERVER_URL=https://discovery-server:8443
+      - SERVER_URL=https://s01-server:8443
       - CERT_FILE=/etc/ssl/certs/client.crt
       - KEY_FILE=/etc/ssl/certs/client.key
       - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
@@ -138,7 +138,7 @@ services:
     environment:
       - SERVICE_NAME=api-service
       - INSTANCE_NAME=api-01-test
-      - SERVER_URL=https://discovery-server:8443
+      - SERVER_URL=https://s01-server:8443
       - CERT_FILE=/etc/ssl/certs/client.crt
       - KEY_FILE=/etc/ssl/certs/client.key
       - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
@@ -169,7 +169,7 @@ services:
     environment:
       - SERVICE_NAME=database
       - INSTANCE_NAME=db-primary-test
-      - SERVER_URL=https://discovery-server:8443
+      - SERVER_URL=https://s01-server:8443
       - CERT_FILE=/etc/ssl/certs/client.crt
       - KEY_FILE=/etc/ssl/certs/client.key
       - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
@@ -201,7 +201,7 @@ services:
     environment:
       - SERVICE_NAME=worker-service
       - INSTANCE_NAME=worker-01-test
-      - SERVER_URL=https://discovery-server:8443
+      - SERVER_URL=https://s01-server:8443
       - CERT_FILE=/etc/ssl/certs/client.crt
       - KEY_FILE=/etc/ssl/certs/client.key
       - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
@@ -232,7 +232,7 @@ services:
     environment:
       - SERVICE_NAME=worker-service
       - INSTANCE_NAME=worker-02-test
-      - SERVER_URL=https://discovery-server:8443
+      - SERVER_URL=https://s01-server:8443
       - CERT_FILE=/etc/ssl/certs/client.crt
       - KEY_FILE=/etc/ssl/certs/client.key
       - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
@@ -263,7 +263,7 @@ services:
     environment:
       - SERVICE_NAME=test-service
       - INSTANCE_NAME=test-client
-      - SERVER_URL=https://discovery-server:8443
+      - SERVER_URL=https://s01-server:8443
       - CERT_FILE=/etc/ssl/certs/test-client.crt
       - KEY_FILE=/etc/ssl/certs/test-client.key
       - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
@@ -295,7 +295,7 @@ services:
     environment:
       - SERVICE_NAME=load-test-service
       - INSTANCE_NAME=load-test-01
-      - SERVER_URL=https://discovery-server:8443
+      - SERVER_URL=https://s01-server:8443
       - CERT_FILE=/etc/ssl/certs/client.crt
       - KEY_FILE=/etc/ssl/certs/client.key
       - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt

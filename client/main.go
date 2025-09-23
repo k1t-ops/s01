@@ -48,16 +48,16 @@ type StatusResponse struct {
 	Status string `json:"status"`
 }
 
-// DiscoveryClient handles communication with the discovery server
-type DiscoveryClient struct {
+// S01Client handles communication with the s01 server
+type S01Client struct {
 	config     *Config
 	logger     *slog.Logger
 	httpClient *http.Client
 	stopChan   chan struct{}
 }
 
-// NewDiscoveryClient creates a new discovery client instance
-func NewDiscoveryClient(config *Config, logger *slog.Logger) (*DiscoveryClient, error) {
+// NewS01Client creates a new s01 client instance
+func NewS01Client(config *Config, logger *slog.Logger) (*S01Client, error) {
 	tlsConfig, err := setupTLSConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup TLS: %v", err)
@@ -72,7 +72,7 @@ func NewDiscoveryClient(config *Config, logger *slog.Logger) (*DiscoveryClient, 
 		},
 	}
 
-	return &DiscoveryClient{
+	return &S01Client{
 		config:     config,
 		logger:     logger,
 		httpClient: httpClient,
@@ -235,7 +235,7 @@ func loadHealthConfig() HealthConfig {
 	configPaths := []string{
 		"./health-config.json",
 		"./config/health-config.json",
-		"/etc/discovery/health-config.json",
+		"/etc/s01/health-config.json",
 	}
 
 	for _, configPath := range configPaths {
@@ -599,8 +599,8 @@ func testLocalNetworking() bool {
 	return true
 }
 
-// reportStatus sends a status report to the discovery server
-func (dc *DiscoveryClient) reportStatus() error {
+// reportStatus sends a status report to the s01 server
+func (dc *S01Client) reportStatus() error {
 	// Get comprehensive health metrics
 	config := loadHealthConfig()
 	healthMetrics := performHealthChecks(config)
@@ -681,8 +681,8 @@ func (dc *DiscoveryClient) reportStatus() error {
 }
 
 // Start begins the periodic status reporting
-func (dc *DiscoveryClient) Start() error {
-	dc.logger.Info("Starting discovery client",
+func (dc *S01Client) Start() error {
+	dc.logger.Info("Starting s01 client",
 		"service_name", dc.config.ServiceName,
 		"instance_name", dc.config.InstanceName,
 		"server_url", dc.config.ServerURL,
@@ -703,7 +703,7 @@ func (dc *DiscoveryClient) Start() error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	dc.logger.Info("Discovery client started, reporting status periodically")
+	dc.logger.Info("S01 client started, reporting status periodically")
 
 	for {
 		select {
@@ -723,8 +723,8 @@ func (dc *DiscoveryClient) Start() error {
 	}
 }
 
-// Stop stops the discovery client
-func (dc *DiscoveryClient) Stop() {
+// Stop stops the s01 client
+func (dc *S01Client) Stop() {
 	close(dc.stopChan)
 }
 
@@ -772,7 +772,7 @@ func loadConfig() (*Config, error) {
 
 	// Try to read config file if it exists
 	configPaths := []string{
-		"/etc/discovery/client-config.json",
+		"/etc/s01/client-config.json",
 		"./config/client-config.json",
 		"./client-config.json",
 	}
@@ -843,12 +843,12 @@ func setupLogger(level string) *slog.Logger {
 func main() {
 	// Handle help flag for Docker health checks
 	if len(os.Args) > 1 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
-		fmt.Println("Discovery Client - Host health monitoring and service discovery client")
+		fmt.Println("S01 Client - Host health monitoring and service discovery client")
 		fmt.Println("")
 		fmt.Println("Environment Variables:")
 		fmt.Println("  SERVICE_NAME       - Name of the service (required)")
 		fmt.Println("  INSTANCE_NAME      - Instance identifier")
-		fmt.Println("  SERVER_URL         - Discovery server URL")
+		fmt.Println("  SERVER_URL         - S01 server URL")
 		fmt.Println("  CERT_FILE          - Client certificate file")
 		fmt.Println("  KEY_FILE           - Client private key file")
 		fmt.Println("  CA_CERT_FILE       - Root CA certificate file")
@@ -880,13 +880,13 @@ func main() {
 
 	logger := setupLogger(config.LogLevel)
 
-	client, err := NewDiscoveryClient(config, logger)
+	client, err := NewS01Client(config, logger)
 	if err != nil {
-		logger.Error("Failed to create discovery client", "error", err)
+		logger.Error("Failed to create s01 client", "error", err)
 		os.Exit(1)
 	}
 
-	logger.Info("Discovery client configuration loaded",
+	logger.Info("S01 client configuration loaded",
 		"service_name", config.ServiceName,
 		"instance_name", config.InstanceName,
 		"server_url", config.ServerURL,

@@ -1,16 +1,16 @@
-# Host Discovery Service Makefile
+# S01 Makefile
 
 .PHONY: help init build build-all start stop restart test health status logs clean cert dev
 
 # Default target
 help: ## Show available commands
-	@echo "Host Discovery Service Commands:"
+	@echo "S01 Commands:"
 	@echo ""
 	@awk 'BEGIN {FS = ":.*##"}; /^[a-zA-Z_-]+:.*?##/ { printf "  %-15s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 # Setup and initialization
 init: ## Initialize CA, build images, and start services
-	@echo "Initializing Host Discovery Service..."
+	@echo "Initializing S01..."
 	@chmod +x scripts/*.sh
 	@./scripts/init-ca.sh
 	@$(MAKE) build-all
@@ -18,23 +18,23 @@ init: ## Initialize CA, build images, and start services
 	@echo "System ready! Try: make test"
 
 # Build targets
-build: ## Build discovery server image
-	@docker-compose build discovery-server
+build: ## Build s01 server image
+	@docker-compose build s01-server
 
 build-all: ## Build all Docker images
 	@docker-compose build
 
 # Service management
-start: ## Start core services (CA and discovery server)
-	@docker-compose up -d step-ca discovery-server
+start: ## Start core services (CA and s01 server)
+	@docker-compose up -d step-ca s01-server
 	@echo "Services started:"
-	@echo "  Discovery Server: https://localhost:8443"
+	@echo "  S01 Server: https://localhost:8443"
 	@echo "  Step-CA: https://localhost:9000"
 
 start-prod: ## Start production environment
 	@docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 	@echo "Production environment started:"
-	@echo "  Discovery Server: https://localhost:8443"
+	@echo "  S01 Server: https://localhost:8443"
 	@echo "  Step-CA: https://localhost:9000"
 
 start-test: ## Start full test environment with all clients
@@ -42,7 +42,7 @@ start-test: ## Start full test environment with all clients
 	@echo "Test environment started with all test clients"
 
 start-demo: ## Start services with demo clients (legacy)
-	@docker-compose up -d step-ca discovery-server
+	@docker-compose up -d step-ca s01-server
 	@docker-compose --profile demo up -d
 
 stop: ## Stop all services
@@ -60,7 +60,7 @@ restart: stop start ## Restart core services
 
 # Testing and monitoring
 test: ## Run test suite
-	@./scripts/test-discovery.sh
+	@./scripts/test-s01.sh
 
 test-load: ## Start load testing environment
 	@docker-compose -f docker-compose.yml -f docker-compose.test.yml up -d load-test-client
@@ -68,7 +68,7 @@ test-load: ## Start load testing environment
 
 health: ## Check service health
 	@echo "Service Health:"
-	@echo -n "  Discovery Server: "
+	@echo -n "  s01 Server: "
 	@curl -s http://localhost:8080/health | jq -r '.status' 2>/dev/null || echo "DOWN"
 	@echo -n "  Step-CA: "
 	@docker-compose exec -T step-ca step ca health >/dev/null 2>&1 && echo "UP" || echo "DOWN"
@@ -101,8 +101,8 @@ logs-prod: ## Show production environment logs
 logs-test: ## Show test environment logs
 	@docker-compose -f docker-compose.yml -f docker-compose.test.yml logs -f
 
-logs-server: ## Show discovery server logs
-	@docker-compose logs -f discovery-server
+logs-server: ## Show s01 server logs
+	@docker-compose logs -f s01-server
 
 logs-ca: ## Show step-ca logs
 	@docker-compose logs -f step-ca
@@ -111,14 +111,14 @@ logs-clients: ## Show all test client logs
 	@docker-compose -f docker-compose.yml -f docker-compose.test.yml logs -f client-web-01 client-api-01 client-db-primary client-worker-01
 
 # Development
-dev-server: ## Run discovery server locally
+dev-server: ## Run s01 server locally
 	@cd server && \
 	CERT_FILE=../ca/certs/server.crt \
 	KEY_FILE=../ca/certs/server.key \
 	CA_CERT_FILE=../ca/certs/root_ca.crt \
 	go run main.go
 
-dev-client: ## Run discovery client locally
+dev-client: ## Run s01 client locally
 	@cd client && \
 	SERVICE_NAME=dev-service \
 	INSTANCE_NAME=dev-01 \
@@ -129,10 +129,10 @@ dev-client: ## Run discovery client locally
 	go run main.go
 
 # Binary deployment (production/standalone)
-deploy-server: ## Deploy discovery server binary from GitHub releases
+deploy-server: ## Deploy s01 server binary from GitHub releases
 	@./scripts/deploy.sh server --repo $(DEFAULT_REPO) $(DEPLOY_ARGS)
 
-deploy-client: ## Deploy discovery client binary from GitHub releases
+deploy-client: ## Deploy s01 client binary from GitHub releases
 	@./scripts/deploy.sh client --repo $(DEFAULT_REPO) $(DEPLOY_ARGS)
 
 deploy-full: ## Deploy both server and client binaries
@@ -172,7 +172,7 @@ configure: ## Configure deployment repository settings
 configure-repo: ## Configure repository directly (usage: make configure-repo REPO=owner/repo-name)
 	@if [ -z "$(REPO)" ]; then \
 		echo "Usage: make configure-repo REPO=owner/repository-name"; \
-		echo "Example: make configure-repo REPO=myorg/discovery-service"; \
+		echo "Example: make configure-repo REPO=myorg/s01-service"; \
 		exit 1; \
 	fi
 	@./scripts/configure-deployment.sh --repo $(REPO)
@@ -184,7 +184,7 @@ configure-reset: ## Reset deployment configuration to defaults
 	@./scripts/configure-deployment.sh --reset
 
 # Docker deployment variables
-DEFAULT_REPO ?= your-org/discovery-service
+DEFAULT_REPO ?= your-org/s01-service
 DEPLOY_ARGS ?=
 
 # Cleanup

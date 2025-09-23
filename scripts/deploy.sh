@@ -1,14 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
-# Simple deployment wrapper for Host Discovery Service
+# Simple deployment wrapper for Host S01 Service
 # This script provides easy commands for common deployment scenarios
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_SCRIPT="$SCRIPT_DIR/deploy-binary.sh"
 
 # Configuration
-DEFAULT_REPO="${DISCOVERY_REPO:-your-org/discovery-service}"  # Set DISCOVERY_REPO env var or update this default
+DEFAULT_REPO="${S01_REPO:-your-org/s01-service}"  # Set S01_REPO env var or update this default
 VERSION="latest"
 ENVIRONMENT=""
 
@@ -35,11 +35,11 @@ usage() {
     cat << EOF
 Usage: $0 <command> [options]
 
-Simple deployment wrapper for Host Discovery Service
+Simple deployment wrapper for Host S01 Service
 
 COMMANDS:
-    server                  Deploy discovery server only
-    client                  Deploy discovery client only
+    server                  Deploy s01 server only
+    client                  Deploy s01 client only
     full                    Deploy both server and client
     production             Deploy for production environment
     development            Deploy for development environment
@@ -67,7 +67,7 @@ EXAMPLES:
     $0 status                           # Check service status
 
 ENVIRONMENT VARIABLES:
-    DISCOVERY_REPO     GitHub repository (overrides default)
+    S01_REPO     GitHub repository (overrides default)
     GITHUB_TOKEN       GitHub token for private repositories
 
 EOF
@@ -117,17 +117,17 @@ parse_options() {
 }
 
 deploy_server() {
-    log_info "Deploying discovery server..."
+    log_info "Deploying s01 server..."
     "$DEPLOY_SCRIPT" --server --repo "$DEFAULT_REPO" --version "$VERSION" $EXTRA_ARGS
 }
 
 deploy_client() {
-    log_info "Deploying discovery client..."
+    log_info "Deploying s01 client..."
     "$DEPLOY_SCRIPT" --client --repo "$DEFAULT_REPO" --version "$VERSION" $EXTRA_ARGS
 }
 
 deploy_full() {
-    log_info "Deploying full discovery service (server + client)..."
+    log_info "Deploying full s01 service (server + client)..."
     "$DEPLOY_SCRIPT" --all --repo "$DEFAULT_REPO" --version "$VERSION" $EXTRA_ARGS
 }
 
@@ -136,12 +136,12 @@ deploy_production() {
 
     # Production-specific settings
     local prod_args="--all --repo $DEFAULT_REPO --version $VERSION"
-    prod_args="$prod_args --install-dir /opt/discovery"
-    prod_args="$prod_args --config-dir /etc/discovery"
-    prod_args="$prod_args --cert-dir /etc/ssl/discovery"
-    prod_args="$prod_args --data-dir /var/lib/discovery"
-    prod_args="$prod_args --log-dir /var/log/discovery"
-    prod_args="$prod_args --user discovery --group discovery"
+    prod_args="$prod_args --install-dir /opt/s01"
+    prod_args="$prod_args --config-dir /etc/s01"
+    prod_args="$prod_args --cert-dir /etc/ssl/s01"
+    prod_args="$prod_args --data-dir /var/lib/s01"
+    prod_args="$prod_args --log-dir /var/log/s01"
+    prod_args="$prod_args --user s01 --group s01"
 
     "$DEPLOY_SCRIPT" $prod_args $EXTRA_ARGS
 
@@ -159,10 +159,10 @@ deploy_development() {
     # Development-specific settings
     local dev_args="--all --repo $DEFAULT_REPO --version $VERSION"
     dev_args="$dev_args --install-dir /usr/local/bin"
-    dev_args="$dev_args --config-dir /usr/local/etc/discovery"
-    dev_args="$dev_args --cert-dir /usr/local/etc/ssl/discovery"
-    dev_args="$dev_args --data-dir /usr/local/var/discovery"
-    dev_args="$dev_args --log-dir /usr/local/var/log/discovery"
+    dev_args="$dev_args --config-dir /usr/local/etc/s01"
+    dev_args="$dev_args --cert-dir /usr/local/etc/ssl/s01"
+    dev_args="$dev_args --data-dir /usr/local/var/s01"
+    dev_args="$dev_args --log-dir /usr/local/var/log/s01"
     dev_args="$dev_args --user $USER --group $(id -gn)"
     dev_args="$dev_args --no-systemd"
 
@@ -180,11 +180,11 @@ update_installation() {
     local has_server=false
     local has_client=false
 
-    if [[ -f "/opt/discovery/discovery-server" ]] || [[ -f "/usr/local/bin/discovery-server" ]]; then
+    if [[ -f "/opt/s01/s01-server" ]] || [[ -f "/usr/local/bin/s01-server" ]]; then
         has_server=true
     fi
 
-    if [[ -f "/opt/discovery/discovery-client" ]] || [[ -f "/usr/local/bin/discovery-client" ]]; then
+    if [[ -f "/opt/s01/s01-client" ]] || [[ -f "/usr/local/bin/s01-client" ]]; then
         has_client=true
     fi
 
@@ -211,19 +211,19 @@ update_installation() {
 }
 
 show_status() {
-    log_info "Discovery Service Status:"
+    log_info "S01 Service Status:"
     echo
 
     # Check if binaries exist
     echo "Installation Status:"
-    for binary in "/opt/discovery/discovery-server" "/usr/local/bin/discovery-server"; do
+    for binary in "/opt/s01/s01-server" "/usr/local/bin/s01-server"; do
         if [[ -f "$binary" ]]; then
             echo "  Server: $binary ($(stat -c %y "$binary"))"
             break
         fi
     done
 
-    for binary in "/opt/discovery/discovery-client" "/usr/local/bin/discovery-client"; do
+    for binary in "/opt/s01/s01-client" "/usr/local/bin/s01-client"; do
         if [[ -f "$binary" ]]; then
             echo "  Client: $binary ($(stat -c %y "$binary"))"
             break
@@ -235,7 +235,7 @@ show_status() {
     # Check systemd services
     if command -v systemctl &> /dev/null; then
         echo "Service Status:"
-        for service in "discovery-server" "discovery-client"; do
+        for service in "s01-server" "s01-client"; do
             if systemctl list-unit-files | grep -q "$service.service"; then
                 local status=$(systemctl is-active "$service" 2>/dev/null || echo "inactive")
                 local enabled=$(systemctl is-enabled "$service" 2>/dev/null || echo "disabled")
@@ -248,26 +248,26 @@ show_status() {
 
     # Check processes
     echo "Running Processes:"
-    if pgrep -f discovery-server >/dev/null; then
-        echo "  discovery-server: $(pgrep -f discovery-server | wc -l) process(es)"
+    if pgrep -f s01-server >/dev/null; then
+        echo "  s01-server: $(pgrep -f s01-server | wc -l) process(es)"
     else
-        echo "  discovery-server: not running"
+        echo "  s01-server: not running"
     fi
 
-    if pgrep -f discovery-client >/dev/null; then
-        echo "  discovery-client: $(pgrep -f discovery-client | wc -l) process(es)"
+    if pgrep -f s01-client >/dev/null; then
+        echo "  s01-client: $(pgrep -f s01-client | wc -l) process(es)"
     else
-        echo "  discovery-client: not running"
+        echo "  s01-client: not running"
     fi
 }
 
 show_logs() {
     if command -v systemctl &> /dev/null; then
         log_info "Showing service logs (press Ctrl+C to exit)..."
-        journalctl -u discovery-server -u discovery-client -f
+        journalctl -u s01-server -u s01-client -f
     else
         log_info "Checking log files..."
-        for log_dir in "/var/log/discovery" "/usr/local/var/log/discovery"; do
+        for log_dir in "/var/log/s01" "/usr/local/var/log/s01"; do
             if [[ -d "$log_dir" ]]; then
                 echo "Log directory: $log_dir"
                 ls -la "$log_dir"
@@ -285,10 +285,10 @@ show_logs() {
 }
 
 start_services() {
-    log_info "Starting discovery services..."
+    log_info "Starting s01 services..."
 
     if command -v systemctl &> /dev/null; then
-        for service in "discovery-server" "discovery-client"; do
+        for service in "s01-server" "s01-client"; do
             if systemctl list-unit-files | grep -q "$service.service"; then
                 systemctl start "$service" || log_warn "Failed to start $service"
             fi
@@ -298,15 +298,15 @@ start_services() {
     else
         log_warn "systemd not available - please start services manually"
         log_info "Server binary locations:"
-        find /opt /usr/local -name "discovery-*" -type f 2>/dev/null || true
+        find /opt /usr/local -name "s01-*" -type f 2>/dev/null || true
     fi
 }
 
 stop_services() {
-    log_info "Stopping discovery services..."
+    log_info "Stopping s01 services..."
 
     if command -v systemctl &> /dev/null; then
-        for service in "discovery-server" "discovery-client"; do
+        for service in "s01-server" "s01-client"; do
             if systemctl list-unit-files | grep -q "$service.service"; then
                 systemctl stop "$service" || log_warn "Failed to stop $service"
             fi
@@ -314,8 +314,8 @@ stop_services() {
     fi
 
     # Also kill any running processes
-    pkill -f discovery-server || true
-    pkill -f discovery-client || true
+    pkill -f s01-server || true
+    pkill -f s01-client || true
 
     log_info "Services stopped"
 }
@@ -327,7 +327,7 @@ restart_services() {
 }
 
 remove_installation() {
-    log_warn "This will completely remove the Discovery Service installation"
+    log_warn "This will completely remove the S01 Service installation"
     read -p "Are you sure? [y/N] " -n 1 -r
     echo
 
@@ -336,14 +336,14 @@ remove_installation() {
         exit 0
     fi
 
-    log_info "Removing Discovery Service installation..."
+    log_info "Removing S01 Service installation..."
 
     # Stop services
     stop_services
 
     # Remove systemd services
     if command -v systemctl &> /dev/null; then
-        for service in "discovery-server" "discovery-client"; do
+        for service in "s01-server" "s01-client"; do
             if systemctl list-unit-files | grep -q "$service.service"; then
                 systemctl disable "$service" || true
                 rm -f "/etc/systemd/system/$service.service"
@@ -353,25 +353,25 @@ remove_installation() {
     fi
 
     # Remove files and directories
-    rm -rf /opt/discovery
-    rm -rf /etc/discovery
-    rm -rf /var/lib/discovery
-    rm -rf /var/log/discovery
-    rm -rf /usr/local/bin/discovery-*
-    rm -rf /usr/local/etc/discovery
-    rm -rf /usr/local/var/discovery
-    rm -rf /usr/local/var/log/discovery
+    rm -rf /opt/s01
+    rm -rf /etc/s01
+    rm -rf /var/lib/s01
+    rm -rf /var/log/s01
+    rm -rf /usr/local/bin/s01-*
+    rm -rf /usr/local/etc/s01
+    rm -rf /usr/local/var/s01
+    rm -rf /usr/local/var/log/s01
 
     # Remove user (be careful here)
-    if getent passwd discovery >/dev/null 2>&1; then
-        userdel discovery || log_warn "Could not remove user 'discovery'"
+    if getent passwd s01 >/dev/null 2>&1; then
+        userdel s01 || log_warn "Could not remove user 's01'"
     fi
 
-    if getent group discovery >/dev/null 2>&1; then
-        groupdel discovery || log_warn "Could not remove group 'discovery'"
+    if getent group s01 >/dev/null 2>&1; then
+        groupdel s01 || log_warn "Could not remove group 's01'"
     fi
 
-    log_info "Discovery Service removed completely"
+    log_info "S01 Service removed completely"
 }
 
 # Main script

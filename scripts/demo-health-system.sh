@@ -59,8 +59,8 @@ check_services() {
         exit 1
     fi
 
-    if ! docker-compose ps discovery-server | grep -q "Up"; then
-        echo -e "${RED}Error: discovery-server is not running${NC}"
+    if ! docker-compose ps s01-server | grep -q "Up"; then
+        echo -e "${RED}Error: s01-server is not running${NC}"
         echo -e "${YELLOW}Please run: make start${NC}"
         exit 1
     fi
@@ -71,10 +71,10 @@ main() {
     clear
     echo -e "${WHITE}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${WHITE}║                                                                              ║${NC}"
-    echo -e "${WHITE}║  ${MAGENTA}🔍 Host Discovery Service - Enhanced Health Monitoring System Demo${NC}        ${WHITE}║${NC}"
+    echo -e "${WHITE}║  ${MAGENTA}🔍 S01 Service - Enhanced Health Monitoring System Demo${NC}        ${WHITE}║${NC}"
     echo -e "${WHITE}║                                                                              ║${NC}"
     echo -e "${WHITE}║  ${CYAN}This demo showcases the comprehensive health monitoring capabilities${NC}        ${WHITE}║${NC}"
-    echo -e "${WHITE}║  ${CYAN}built into the Host Discovery Service with zero external dependencies.${NC}     ${WHITE}║${NC}"
+    echo -e "${WHITE}║  ${CYAN}built into the S01 Service with zero external dependencies.${NC}     ${WHITE}║${NC}"
     echo -e "${WHITE}║                                                                              ║${NC}"
     echo -e "${WHITE}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -178,7 +178,7 @@ main() {
     echo -e "  ${CYAN}Status History:${NC}       Configurable history tracking (default: 100)"
     echo -e "  ${CYAN}Real-time Updates:${NC}    Live dashboard with configurable refresh"
     echo ""
-    demo_step "All metrics are included in discovery API responses for monitoring systems"
+    demo_step "All metrics are included in s01 API responses for monitoring systems"
 
     # Demo 7: Practical Examples
     demo_header "💡 Practical Usage Examples"
@@ -187,13 +187,13 @@ main() {
     echo -e "${YELLOW}Web Server Monitoring:${NC}"
     demo_command "export HEALTH_CPU_THRESHOLD=70.0"
     demo_command "export HEALTH_MEMORY_THRESHOLD=80.0"
-    demo_command "./discovery-client"
+    demo_command "./s01-client"
     echo ""
 
     echo -e "${YELLOW}Database Server Monitoring:${NC}"
     demo_command "export HEALTH_MEMORY_THRESHOLD=90.0  # Higher memory threshold"
     demo_command "export HEALTH_DISK_THRESHOLD=95.0    # Critical for DB storage"
-    demo_command "./discovery-client"
+    demo_command "./s01-client"
     echo ""
 
     echo -e "${YELLOW}Monitoring Specific Host:${NC}"
@@ -203,7 +203,7 @@ main() {
 
     # Demo 8: API Integration
     demo_header "🔌 API Integration & Automation"
-    demo_info "Health metrics are fully integrated into the discovery API:"
+    demo_info "Health metrics are fully integrated into the s01 API:"
     echo ""
     echo -e "  ${CYAN}GET /api/v1/hosts${NC}                    - All hosts with health data"
     echo -e "  ${CYAN}GET /api/v1/hosts/{service}/{instance}${NC} - Detailed host metrics"
@@ -278,7 +278,7 @@ main() {
 
     # Demo Summary
     demo_header "🎉 Demo Complete!"
-    echo -e "${GREEN}You've seen the enhanced Host Discovery Service with:${NC}"
+    echo -e "${GREEN}You've seen the enhanced S01 Service with:${NC}"
     echo ""
     echo -e "  ✅ Comprehensive real-time health monitoring"
     echo -e "  ✅ Zero external dependencies (only Go stdlib)"
@@ -292,7 +292,7 @@ main() {
     echo -e "  • Deploy clients with health monitoring to your infrastructure"
     echo -e "  • Integrate health APIs with your monitoring systems"
     echo ""
-    echo -e "${WHITE}🏆 Your Host Discovery Service is now a comprehensive, zero-dependency${NC}"
+    echo -e "${WHITE}🏆 Your S01 Service is now a comprehensive, zero-dependency${NC}"
     echo -e "${WHITE}   infrastructure monitoring solution!${NC}"
     echo ""
 }
@@ -308,7 +308,7 @@ case "${1:-}" in
         DEMO_DELAY=0.5
         ;;
     --help)
-        echo "Host Discovery Service - Health Monitoring Demo"
+        echo "S01 Service - Health Monitoring Demo"
         echo ""
         echo "Usage: $0 [OPTIONS]"
         echo ""

@@ -1,4 +1,4 @@
-# Host Discovery Service - .gitignore
+# S01 Service - .gitignore
 # =================================
 
 # ===========================
@@ -11,9 +11,9 @@
 *.dll
 *.so
 *.dylib
-discovery-server
-discovery-client
-discovery-*-run
+s01-server
+s01-client
+s01-*-run
 
 # Test binary, built with `go test -c`
 *.test

@@ -88,11 +88,11 @@ extract_response_body() {
     echo "$1" | sed '/HTTP_CODE:/d'
 }
 
-echo -e "${BLUE}Discovery Service Test Suite${NC}"
+echo -e "${BLUE}S01 Service Test Suite${NC}"
 echo -e "${BLUE}============================${NC}"
 echo ""
 
-# Check if discovery server is running
+# Check if s01 server is running
 echo -e "${YELLOW}Checking server status...${NC}"
 
 # Test 1: Health check (no auth required)
@@ -159,8 +159,8 @@ fi
 
 echo ""
 
-# Test 5: Host discovery
-echo -e "${YELLOW}3. Testing host discovery...${NC}"
+# Test 5: Host s01
+echo -e "${YELLOW}3. Testing host s01...${NC}"
 
 # Get all hosts
 hosts_response=$(make_request "GET" "${SERVER_URL}/api/v1/hosts")
@@ -172,9 +172,9 @@ if [[ "$hosts_code" == "200" ]]; then
 
     # Check if our test host is in the response
     if echo "$hosts_body" | jq -e ".hosts[] | select(.service_name==\"$TEST_SERVICE\" and .instance_name==\"$TEST_INSTANCE\")" >/dev/null 2>&1; then
-        print_result "Test host found in discovery" "PASS"
+        print_result "Test host found in s01" "PASS"
     else
-        print_result "Test host found in discovery" "FAIL" "Test host not found in response"
+        print_result "Test host found in s01" "FAIL" "Test host not found in response"
     fi
 else
     print_result "Get all hosts" "FAIL" "HTTP $hosts_code - $hosts_body"
@@ -320,7 +320,7 @@ echo -e "Total tests: $((PASSED + FAILED))"
 
 if [[ $FAILED -eq 0 ]]; then
     echo -e "\n${GREEN}All tests passed! 🎉${NC}"
-    echo -e "${YELLOW}Your discovery service is working correctly.${NC}"
+    echo -e "${YELLOW}Your s01 service is working correctly.${NC}"
 else
     echo -e "\n${RED}Some tests failed. 😞${NC}"
     echo -e "${YELLOW}Please check the server logs and configuration.${NC}"

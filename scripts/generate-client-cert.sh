@@ -245,24 +245,24 @@ echo -e "${GREEN}Next steps:${NC}"
 echo -e "1. Copy certificates to your host:"
 echo -e "   ${BLUE}scp $CERT_FILE $KEY_FILE ${OUTPUT_DIR}/root_ca.crt user@your-host:/etc/ssl/certs/${NC}"
 echo ""
-echo -e "2. Configure your discovery client:"
+echo -e "2. Configure your s01 client:"
 echo -e "   ${BLUE}export SERVICE_NAME='$SERVICE_NAME'${NC}"
 echo -e "   ${BLUE}export INSTANCE_NAME='$INSTANCE_NAME'${NC}"
 echo -e "   ${BLUE}export CERT_FILE='/etc/ssl/certs/${CERT_NAME}.crt'${NC}"
 echo -e "   ${BLUE}export KEY_FILE='/etc/ssl/certs/${CERT_NAME}.key'${NC}"
 echo -e "   ${BLUE}export CA_CERT_FILE='/etc/ssl/certs/root_ca.crt'${NC}"
 echo ""
-echo -e "3. Start the discovery client on your host"
+echo -e "3. Start the s01 client on your host"
 
 # Create a simple environment file
 ENV_FILE="${OUTPUT_DIR}/${CERT_NAME}.env"
 cat > "$ENV_FILE" << EOF
-# Discovery Client Configuration for ${SERVICE_NAME}:${INSTANCE_NAME}
+# S01 Client Configuration for ${SERVICE_NAME}:${INSTANCE_NAME}
 # Generated on $(date)
 
 SERVICE_NAME=$SERVICE_NAME
 INSTANCE_NAME=$INSTANCE_NAME
-SERVER_URL=https://discovery-server:8443
+SERVER_URL=https://s01-server:8443
 CERT_FILE=/etc/ssl/certs/${CERT_NAME}.crt
 KEY_FILE=/etc/ssl/certs/${CERT_NAME}.key
 CA_CERT_FILE=/etc/ssl/certs/root_ca.crt

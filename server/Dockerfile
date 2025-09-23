@@ -17,7 +17,7 @@ RUN go mod download
 COPY . .
 
 # Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o discovery-server .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o s01-server .
 
 # Runtime stage
 FROM alpine:latest
@@ -26,21 +26,21 @@ FROM alpine:latest
 RUN apk --no-cache add ca-certificates curl
 
 # Create non-root user
-RUN addgroup -g 1001 -S discovery && \
-    adduser -u 1001 -S discovery -G discovery
+RUN addgroup -g 1001 -S s01 && \
+    adduser -u 1001 -S s01 -G s01
 
 # Set working directory
 WORKDIR /app
 
 # Copy the binary from builder stage
-COPY --from=builder /app/discovery-server .
+COPY --from=builder /app/s01-server .
 
 # Create directories for certificates and config
-RUN mkdir -p /etc/ssl/certs /etc/discovery && \
-    chown -R discovery:discovery /app /etc/ssl/certs /etc/discovery
+RUN mkdir -p /etc/ssl/certs /etc/s01 && \
+    chown -R s01:s01 /app /etc/ssl/certs /etc/s01
 
 # Switch to non-root user
-USER discovery
+USER s01
 
 # Expose the HTTPS port
 EXPOSE 8443
@@ -50,4 +50,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -k https://localhost:8443/health || exit 1
 
 # Run the binary
-CMD ["./discovery-server"]
+CMD ["./s01-server"]

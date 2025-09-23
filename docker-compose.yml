@@ -24,7 +24,7 @@ services:
       - ./ca/config:/etc/step-ca
       - ./ca/certs:/etc/ssl/step
     networks:
-      - discovery-net
+      - s01-net
     healthcheck:
       test: ["CMD", "step", "ca", "health"]
       interval: 30s
@@ -53,7 +53,7 @@ services:
       - ./ca/config:/etc/step-ca
       - ./ca/certs:/etc/ssl/step
     networks:
-      - discovery-net
+      - s01-net
     command: [
         "sh",
         "-c",
@@ -75,7 +75,7 @@ services:
         fi",
       ]
 
-  discovery-server:
+  s01-server:
     build:
       context: ./server
       dockerfile: Dockerfile
@@ -99,7 +99,7 @@ services:
       step-ca:
         condition: service_healthy
     networks:
-      - discovery-net
+      - s01-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -108,7 +108,7 @@ services:
       start_period: 30s
 
 networks:
-  discovery-net:
+  s01-net:
     driver: bridge
     ipam:
       config:

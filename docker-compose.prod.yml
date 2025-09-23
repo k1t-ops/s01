@@ -17,7 +17,7 @@ services:
       - ca-config:/etc/step-ca
       - ca-certs:/etc/ssl/step
     networks:
-      - discovery-net
+      - s01-net
     healthcheck:
       test: ["CMD", "step", "ca", "health"]
       interval: 60s
@@ -36,51 +36,51 @@ services:
         "/home/step/config/ca.json",
       ]
 
-s01-server:
-  build:
-    context: ./server
-    dockerfile: Dockerfile
-  image: s01-server:latest
-  container_name: s01-server-prod
-  restart: always
-  ports:
-    - "8443:8443"
-    - "8080:8080"
-  environment:
-    - STEP_CA_URL=https://step-ca:9000
-    - SERVER_PORT=8443
-    - HEALTH_PORT=8080
-    - MAX_HISTORY=1000
-    - STALE_TIMEOUT=600
-    - CA_CERT_FILE=/etc/ssl/certs/ca_chain.crt
-    - LOG_LEVEL=warn
-  volumes:
-    - ca-certs:/etc/ssl/certs:ro
-    - server-config:/etc/s01:ro
-  depends_on:
-    step-ca:
-      condition: service_healthy
-  networks:
-    - s01-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 512M
-        reservations:
-          cpus: '0.5'
-          memory: 256M
+  s01-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+      image: s01-server:latest
+      container_name: s01-server-prod
+      restart: always
+      ports:
+        - "8443:8443"
+        - "8080:8080"
+        environment:
+          - STEP_CA_URL=https://step-ca:9000
+          - SERVER_PORT=8443
+          - HEALTH_PORT=8080
+          - MAX_HISTORY=1000
+          - STALE_TIMEOUT=600
+          - CA_CERT_FILE=/etc/ssl/certs/ca_chain.crt
+          - LOG_LEVEL=warn
+          volumes:
+            - ca-certs:/etc/ssl/certs:ro
+            - server-config:/etc/s01:ro
+            depends_on:
+              step-ca:
+                condition: service_healthy
+                networks:
+                  - s01-net
+                  healthcheck:
+                    test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+                    interval: 30s
+                    timeout: 10s
+                    retries: 5
+                    start_period: 60s
+                    logging:
+                      driver: "json-file"
+                      options:
+                        max-size: "10m"
+                        max-file: "3"
+                        deploy:
+                          resources:
+                            limits:
+                              cpus: '1.0'
+                              memory: 512M
+                              reservations:
+                                cpus: '0.5'
+                                memory: 256M
 
 networks:
   s01-net:

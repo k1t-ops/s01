@@ -81,7 +81,7 @@ jobs:
       - name: Build ${{ matrix.component }} binary
         working-directory: ${{ matrix.component }}
         run: |
-          echo "Building discovery-${{ matrix.component }} for ${{ matrix.arch }}..."
+          echo "Building s01-${{ matrix.component }} for ${{ matrix.arch }}..."
 
           # Build with version information
           go mod tidy

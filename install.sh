@@ -6,7 +6,7 @@ set -euo pipefail
 # Or:    wget -qO- https://raw.githubusercontent.com/YOUR_ORG/YOUR_REPO/main/install.sh | bash
 
 # Configuration
-GITHUB_REPO="${DISCOVERY_REPO:-k1t-ops/s01}"
+GITHUB_REPO="${S01_REPO:-k1t-ops/s01}"
 DEFAULT_VERSION="latest"
 INSTALL_PREFIX="/usr/local"
 CONFIG_DIR="$HOME/.config/s01"
@@ -24,9 +24,7 @@ NC='\033[0m' # No Color
 print_banner() {
     echo -e "${CYAN}"
     echo "╭─────────────────────────────────────────────────────╮"
-    echo "│          Host Discovery Service Installer           │"
-    echo "│                                                     │"
-    echo "│  One-liner installation from GitHub releases        │"
+    echo "│                   S01 Installer                     │"
     echo "╰─────────────────────────────────────────────────────╯"
     echo -e "${NC}"
 }
@@ -45,13 +43,15 @@ log_error() {
 }
 
 log_debug() {
-    echo -e "${BLUE}[DEBUG]${NC} $1"
+    echo -e "${BLUE}[DEBUG]${NC} $1" >&2
 }
+
+
 
 # Usage information
 usage() {
     cat << EOF
-${GREEN}Host Discovery Service - One-liner Installer${NC}
+${GREEN}S01 Installer${NC}
 
 ${YELLOW}USAGE:${NC}
   curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPO/main/install.sh | bash
@@ -81,7 +81,7 @@ ${YELLOW}EXAMPLES:${NC}
   curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPO/main/install.sh | sudo bash -s -- --system
 
 ${YELLOW}ENVIRONMENT VARIABLES:${NC}
-  DISCOVERY_REPO        Override GitHub repository
+  S01_REPO        Override GitHub repository
   GITHUB_TOKEN          GitHub token for private repositories
 
 EOF
@@ -147,7 +147,8 @@ detect_arch() {
     esac
 
     log_debug "Detected architecture: $raw_arch → $normalized_arch"
-    echo "$normalized_arch"
+    DETECTED_ARCH="$normalized_arch"
+    return 0
 }
 
 # Get latest version from GitHub
@@ -176,7 +177,7 @@ get_latest_version() {
         exit 1
     fi
 
-    log_debug "API Response received (first 200 chars): $(echo "$api_response" | cut -c1-200)..."
+
 
     # Check for API errors
     if echo "$api_response" | grep -q '"message".*"Not Found"'; then
@@ -189,24 +190,8 @@ get_latest_version() {
         exit 1
     fi
 
-    # Try multiple approaches to extract version
-    local version=""
-
-    # Method 1: Simple grep + sed
+    local version
     version=$(echo "$api_response" | grep '"tag_name"' | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' | head -1)
-    log_debug "Method 1 result: '$version'"
-
-    # Method 2: Alternative grep approach
-    if [[ -z "$version" ]]; then
-        version=$(echo "$api_response" | grep -o '"tag_name":"[^"]*"' | cut -d'"' -f4 | head -1)
-        log_debug "Method 2 result: '$version'"
-    fi
-
-    # Method 3: Using awk
-    if [[ -z "$version" ]]; then
-        version=$(echo "$api_response" | awk -F'"' '/tag_name/ {print $4; exit}')
-        log_debug "Method 3 result: '$version'"
-    fi
 
     if [[ -z "$version" || "$version" == "null" ]]; then
         log_error "No releases found for repository: $GITHUB_REPO"
@@ -214,12 +199,13 @@ get_latest_version() {
         log_error "The repository exists but has no published releases."
         log_error "Please ask the maintainer to create a release with binaries."
         log_error "Releases page: https://github.com/$GITHUB_REPO/releases"
-        log_debug "Full API response: $api_response"
+
         exit 1
     fi
 
-    log_debug "Successfully extracted version: $version"
-    echo "$version"
+
+    LATEST_VERSION="$version"
+    return 0
 }
 
 # Download and extract binary
@@ -247,35 +233,22 @@ download_binary() {
     http_code=$(curl -s -o /dev/null -w "%{http_code}" $auth_header "$download_url" 2>/dev/null)
 
     case "$http_code" in
-        200)
+        200|302)
             log_debug "Download URL is accessible"
             ;;
         404)
             log_error "Binary not found: $binary_name.tar.gz"
-            echo
-            log_error "This means:"
-            log_error "  • Release exists but doesn't have binaries for $arch architecture"
-            log_error "  • Check available files at: https://github.com/$GITHUB_REPO/releases/tag/$version"
-            echo
-            log_error "Supported architectures are typically: amd64, arm64, arm"
+            log_error "Available files: https://github.com/$GITHUB_REPO/releases/tag/$version"
             return 1
             ;;
         403)
             log_error "Access denied to repository: $GITHUB_REPO"
-            echo
-            log_error "This means:"
-            log_error "  • Repository is private and requires authentication"
-            log_error "  • Set GITHUB_TOKEN environment variable with a valid token"
+            log_error "Set GITHUB_TOKEN environment variable for private repositories"
             return 1
             ;;
         *)
             log_error "Cannot access release (HTTP $http_code)"
             log_error "URL: $download_url"
-            echo
-            log_error "Check if:"
-            log_error "  • Repository exists: https://github.com/$GITHUB_REPO"
-            log_error "  • Release exists for version: $version"
-            log_error "  • Internet connection is working"
             return 1
             ;;
     esac
@@ -310,7 +283,8 @@ download_binary() {
     chmod +x "$binary_file"
 
     log_info "✓ $component binary ready"
-    echo "$binary_file"
+    DOWNLOADED_BINARY="$binary_file"
+    return 0
 }
 
 # Diagnose system for troubleshooting
@@ -382,6 +356,7 @@ download_with_fallback() {
 
     # Try primary architecture first
     if download_binary "$component" "$version" "$primary_arch" "$temp_dir"; then
+        FALLBACK_BINARY="$DOWNLOADED_BINARY"
         return 0
     fi
 
@@ -410,6 +385,7 @@ download_with_fallback() {
             if download_binary "$component" "$version" "$fallback_arch" "$temp_dir"; then
                 log_warn "Using $fallback_arch binary instead of $primary_arch"
                 log_warn "This may work but is not optimal for your system"
+                FALLBACK_BINARY="$DOWNLOADED_BINARY"
                 return 0
             fi
         done
@@ -433,12 +409,29 @@ install_binary() {
 
     log_info "Installing $component to $target_path..."
 
-    # Create install directory if it doesn't exist
-    mkdir -p "$install_dir"
+    # Check if install directory exists
+    if [[ ! -d "$install_dir" ]]; then
+        log_error "Install directory does not exist: $install_dir"
+        log_error "Please create it manually:"
+        log_error "  mkdir -p $install_dir"
+        return 1
+    fi
 
     # Copy binary
-    cp "$binary_path" "$target_path"
-    chmod +x "$target_path"
+    if ! cp "$binary_path" "$target_path" 2>/dev/null; then
+        log_error "Cannot copy binary to $target_path (permission denied)"
+        log_info "Please run with elevated privileges:"
+        log_info "  sudo cp $binary_path $target_path"
+        return 1
+    fi
+
+    # Make executable
+    if ! chmod +x "$target_path" 2>/dev/null; then
+        log_error "Cannot make binary executable: $target_path (permission denied)"
+        log_info "Please run:"
+        log_info "  sudo chmod +x $target_path"
+        return 1
+    fi
 
     # Verify installation
     if "$target_path" --version >/dev/null 2>&1 || "$target_path" --help >/dev/null 2>&1; then
@@ -454,7 +447,13 @@ install_binary() {
 create_config() {
     local component="$1"
 
-    mkdir -p "$CONFIG_DIR"
+    # Check if config directory exists
+    if [[ ! -d "$CONFIG_DIR" ]]; then
+        log_error "Config directory does not exist: $CONFIG_DIR"
+        log_error "Please create it manually:"
+        log_error "  mkdir -p $CONFIG_DIR"
+        return 1
+    fi
 
     local config_file="$CONFIG_DIR/${component}.env"
 
@@ -466,7 +465,7 @@ create_config() {
     log_info "Creating basic configuration for $component..."
 
     if [[ "$component" == "server" ]]; then
-        cat > "$config_file" << EOF
+        if ! cat > "$config_file" 2>/dev/null << EOF
 # s01 Server Configuration
 # Edit this file to customize settings
 
@@ -481,8 +480,13 @@ LOG_LEVEL=info
 # KEY_FILE=/path/to/server.key
 # CA_CERT_FILE=/path/to/ca.crt
 EOF
+        then
+            log_error "Cannot write config file: $config_file (permission denied)"
+            log_info "Please run with elevated privileges or use a different config directory"
+            return 1
+        fi
     elif [[ "$component" == "client" ]]; then
-        cat > "$config_file" << EOF
+        if ! cat > "$config_file" 2>/dev/null << EOF
 # s01 Client Configuration
 # Edit this file to customize settings
 
@@ -504,6 +508,11 @@ HEALTH_MEMORY_THRESHOLD=85.0
 HEALTH_DISK_THRESHOLD=85.0
 HEALTH_NETWORK_ENABLED=true
 EOF
+        then
+            log_error "Cannot write config file: $config_file (permission denied)"
+            log_info "Please run with elevated privileges or use a different config directory"
+            return 1
+        fi
     fi
 
     log_info "✓ Configuration created: $config_file"
@@ -518,7 +527,7 @@ create_wrapper() {
 
     log_debug "Creating wrapper script: $wrapper_path"
 
-    cat > "$wrapper_path" << EOF
+    if ! cat > "$wrapper_path" 2>/dev/null << EOF
 #!/bin/bash
 # s01 $component wrapper script
 # Auto-generated by installer
@@ -535,6 +544,11 @@ fi
 # Run the binary
 exec "$binary_path" "\$@"
 EOF
+    then
+        log_error "Cannot create wrapper script: $wrapper_path (permission denied)"
+        log_info "Please run with elevated privileges or use a different install directory"
+        return 1
+    fi
 
     chmod +x "$wrapper_path"
     log_debug "✓ Wrapper created: $wrapper_path"
@@ -638,7 +652,7 @@ while [[ $# -gt 0 ]]; do
         --system)
             SYSTEM_INSTALL=true
             INSTALL_PREFIX="/usr/local"
-            CONFIG_DIR="/etc/discovery"
+            CONFIG_DIR="/etc/s01"
             SERVICE_USER="root"
             shift
             ;;
@@ -681,27 +695,30 @@ main() {
     log_info "Repository: $GITHUB_REPO"
     log_info "Install prefix: $INSTALL_PREFIX"
 
+
+
     # Check dependencies
     check_dependencies
 
     # Detect architecture
-    local arch
-    arch=$(detect_arch)
-    if [[ -z "$arch" ]]; then
+    detect_arch
+    if [[ -z "$DETECTED_ARCH" ]]; then
         log_error "Failed to detect system architecture"
         exit 1
     fi
+    local arch="$DETECTED_ARCH"
     log_info "Detected architecture: $arch"
 
     # Get version
     if [[ "$VERSION" == "latest" ]]; then
         log_info "Resolving latest version..."
-        VERSION=$(get_latest_version)
-        if [[ -z "$VERSION" || "$VERSION" == "latest" ]]; then
+        get_latest_version
+        if [[ -z "$LATEST_VERSION" ]]; then
             log_error "Failed to resolve latest version"
             log_error "Please specify a version with --version or check repository releases"
             exit 1
         fi
+        VERSION="$LATEST_VERSION"
         log_info "Latest version: $VERSION"
     else
         log_info "Using version: $VERSION"
@@ -714,7 +731,6 @@ main() {
 
     # Install directory
     local bin_dir="$INSTALL_PREFIX/bin"
-    mkdir -p "$bin_dir"
 
     local installed_components=()
 
@@ -722,9 +738,8 @@ main() {
     if [[ "$INSTALL_SERVER" == "true" ]]; then
         echo
         log_info "=== Installing Server ==="
-        local server_binary
-        if server_binary=$(download_with_fallback "server" "$VERSION" "$arch" "$temp_dir"); then
-            install_binary "$server_binary" "server" "$bin_dir"
+        if download_with_fallback "server" "$VERSION" "$arch" "$temp_dir"; then
+            install_binary "$FALLBACK_BINARY" "server" "$bin_dir"
             create_config "server"
             create_wrapper "server" "$bin_dir"
             installed_components+=("server")
@@ -740,9 +755,8 @@ main() {
     if [[ "$INSTALL_CLIENT" == "true" ]]; then
         echo
         log_info "=== Installing Client ==="
-        local client_binary
-        if client_binary=$(download_with_fallback "client" "$VERSION" "$arch" "$temp_dir"); then
-            install_binary "$client_binary" "client" "$bin_dir"
+        if download_with_fallback "client" "$VERSION" "$arch" "$temp_dir"; then
+            install_binary "$FALLBACK_BINARY" "client" "$bin_dir"
             create_config "client"
             create_wrapper "client" "$bin_dir"
             installed_components+=("client")
