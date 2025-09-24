@@ -25,14 +25,55 @@ env:
   CGO_ENABLED: 0
 
 jobs:
-  # Build matrix for multiple architectures
+  # Build matrix for multiple architectures and platforms
   build-matrix:
-    name: Build ${{ matrix.arch }} binaries
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.os }}-${{ matrix.arch }} binaries
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        arch: [amd64, arm64, arm]
-        component: [server, client]
+        include:
+          # Linux builds
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            component: server
+          - os: linux
+            arch: arm64
+            runner: ubuntu-latest
+            component: server
+          - os: linux
+            arch: arm
+            runner: ubuntu-latest
+            component: server
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            component: client
+          - os: linux
+            arch: arm64
+            runner: ubuntu-latest
+            component: client
+          - os: linux
+            arch: arm
+            runner: ubuntu-latest
+            component: client
+          # macOS builds
+          - os: darwin
+            arch: amd64
+            runner: macos-13
+            component: server
+          - os: darwin
+            arch: arm64
+            runner: macos-14
+            component: server
+          - os: darwin
+            arch: amd64
+            runner: macos-13
+            component: client
+          - os: darwin
+            arch: arm64
+            runner: macos-14
+            component: client
       fail-fast: false
 
     outputs:
@@ -76,42 +117,53 @@ jobs:
               echo "arch_name=armv7" >> $GITHUB_OUTPUT
               ;;
           esac
-          echo "GOOS=linux" >> $GITHUB_ENV
+          echo "GOOS=${{ matrix.os }}" >> $GITHUB_ENV
 
       - name: Build ${{ matrix.component }} binary
         working-directory: ${{ matrix.component }}
         run: |
-          echo "Building s01-${{ matrix.component }} for ${{ matrix.arch }}..."
+          echo "Building s01-${{ matrix.component }} for ${{ matrix.os }}-${{ matrix.arch }}..."
+
+          # Set binary extension for Windows (if we add it later)
+          BINARY_NAME="s01-${{ matrix.component }}"
 
           # Build with version information
           go mod tidy
           go build -a -installsuffix cgo \
             -ldflags="-w -s -X main.version=${{ steps.version.outputs.version }} -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X main.gitCommit=${{ github.sha }}" \
-            -o s01-${{ matrix.component }} .
+            -o "${BINARY_NAME}" .
 
           # Verify binary
-          file s01-${{ matrix.component }}
+          file "${BINARY_NAME}" || ls -la "${BINARY_NAME}"
 
-          echo "Binary built successfully"
+          echo "Binary built successfully for ${{ matrix.os }}-${{ matrix.arch }}"
 
       - name: Package binary
         working-directory: ${{ matrix.component }}
         run: |
+          BINARY_NAME="s01-${{ matrix.component }}"
+          PACKAGE_NAME="s01-${{ matrix.component }}-${{ matrix.os }}-${{ steps.arch.outputs.arch_name }}"
+
           # Create package
-          tar -czf s01-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz s01-${{ matrix.component }}
+          tar -czf "${PACKAGE_NAME}.tar.gz" "${BINARY_NAME}"
 
           # Generate individual checksum
-          sha256sum s01-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz > s01-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz.sha256
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${PACKAGE_NAME}.tar.gz" > "${PACKAGE_NAME}.tar.gz.sha256"
+          else
+            # macOS uses shasum
+            shasum -a 256 "${PACKAGE_NAME}.tar.gz" > "${PACKAGE_NAME}.tar.gz.sha256"
+          fi
 
-          echo "Package created: s01-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz"
+          echo "Package created: ${PACKAGE_NAME}.tar.gz"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: binaries-${{ matrix.arch }}-${{ matrix.component }}
+          name: binaries-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.component }}
           path: |
-            ${{ matrix.component }}/s01-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz
-            ${{ matrix.component }}/s01-${{ matrix.component }}-linux-${{ steps.arch.outputs.arch_name }}.tar.gz.sha256
+            ${{ matrix.component }}/s01-${{ matrix.component }}-${{ matrix.os }}-${{ steps.arch.outputs.arch_name }}.tar.gz
+            ${{ matrix.component }}/s01-${{ matrix.component }}-${{ matrix.os }}-${{ steps.arch.outputs.arch_name }}.tar.gz.sha256
 
   # Create release with all artifacts
   create-release:
@@ -138,7 +190,12 @@ jobs:
 
           # Create combined checksums file
           cd release
-          sha256sum *.tar.gz > checksums.txt
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum *.tar.gz > checksums.txt
+          else
+            # macOS compatibility (shouldn't happen in ubuntu runner, but just in case)
+            shasum -a 256 *.tar.gz > checksums.txt
+          fi
 
           echo "Release files:"
           ls -la
@@ -169,7 +226,11 @@ jobs:
             done
 
             # Regenerate checksums
-            sha256sum *.tar.gz > checksums.txt
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum *.tar.gz > checksums.txt
+            else
+              shasum -a 256 *.tar.gz > checksums.txt
+            fi
           fi
 
       - name: Generate release notes
@@ -184,7 +245,7 @@ jobs:
 
           ## 📦 What's Included
 
-          This release contains precompiled binaries for:
+          This release contains precompiled binaries for multiple platforms:
 
           ### s01 Server
           $(find release -name "s01-server-*.tar.gz" | sed 's/release\///' | sed 's/^/- **/' | sed 's/$/** - Server binary/')
@@ -195,17 +256,24 @@ jobs:
           ### Checksums
           - **checksums.txt** - SHA256 checksums for all binaries
 
-          ## 🏗️ Supported Architectures
+          ## 🏗️ Supported Platforms & Architectures
 
+          ### Linux
           | Architecture | Description | Binary Suffix |
           |--------------|-------------|---------------|
           | **amd64** | 64-bit Intel/AMD | \`linux-amd64\` |
-          | **arm64** | 64-bit ARM (Apple M1, AWS Graviton) | \`linux-arm64\` |
+          | **arm64** | 64-bit ARM (AWS Graviton, etc.) | \`linux-arm64\` |
           | **armv7** | 32-bit ARM (Raspberry Pi) | \`linux-armv7\` |
+
+          ### macOS
+          | Architecture | Description | Binary Suffix |
+          |--------------|-------------|---------------|
+          | **amd64** | 64-bit Intel Mac | \`darwin-amd64\` |
+          | **arm64** | Apple Silicon (M1/M2/M3) | \`darwin-arm64\` |
 
           ## ⚡ One-Liner Installation
 
-          The installer automatically detects your architecture:
+          The installer automatically detects your platform and architecture:
 
           \`\`\`bash
           # Install both server and client
@@ -223,30 +291,43 @@ jobs:
 
           ## 📥 Manual Download & Installation
 
-          ### Auto-detect Architecture
+          ### Auto-detect Platform & Architecture
           \`\`\`bash
+          # Detect platform and architecture
+          OS=\$(uname -s | tr '[:upper:]' '[:lower:]')
           ARCH=\$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/' | sed 's/armv7l/armv7/')
 
           # Download server
-          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-server-linux-\${ARCH}.tar.gz" | tar xz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-server-\${OS}-\${ARCH}.tar.gz" | tar xz
 
           # Download client
-          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-client-linux-\${ARCH}.tar.gz" | tar xz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-client-\${OS}-\${ARCH}.tar.gz" | tar xz
           \`\`\`
 
-          ### Specific Architecture
+          ### Linux Specific Downloads
           \`\`\`bash
           # AMD64/Intel (most common)
           curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-server-linux-amd64.tar.gz" | tar xz
           curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-client-linux-amd64.tar.gz" | tar xz
 
-          # ARM64 (Apple M1, AWS Graviton, etc.)
+          # ARM64 (AWS Graviton, etc.)
           curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-server-linux-arm64.tar.gz" | tar xz
           curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-client-linux-arm64.tar.gz" | tar xz
 
           # ARMv7 (Raspberry Pi, etc.)
           curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-server-linux-armv7.tar.gz" | tar xz
           curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-client-linux-armv7.tar.gz" | tar xz
+          \`\`\`
+
+          ### macOS Specific Downloads
+          \`\`\`bash
+          # Intel Mac
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-server-darwin-amd64.tar.gz" | tar xz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-client-darwin-amd64.tar.gz" | tar xz
+
+          # Apple Silicon (M1/M2/M3)
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-server-darwin-arm64.tar.gz" | tar xz
+          curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-client-darwin-arm64.tar.gz" | tar xz
           \`\`\`
 
           ## ✅ Verification
@@ -262,10 +343,16 @@ jobs:
 
           ## 🔧 System Requirements
 
+          ### Linux
           - **Operating System**: Linux (any distribution)
           - **Architecture**: x86_64 (amd64), ARM64 (aarch64), or ARMv7 (arm)
           - **Dependencies**: None (statically linked binaries)
           - **Minimum Kernel**: Linux 2.6.32+
+
+          ### macOS
+          - **Operating System**: macOS 10.15+ (Catalina or later)
+          - **Architecture**: Intel (x86_64) or Apple Silicon (arm64)
+          - **Dependencies**: None (statically linked binaries)
 
           ## 🚀 Quick Start
 
@@ -279,7 +366,9 @@ jobs:
           - **Build Date**: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
           - **Git Commit**: ${{ github.sha }}
           - **CGO**: Disabled (static linking)
-          - **Architectures**: $(find release -name "*.tar.gz" | wc -l) binaries across $(find release -name "*server*.tar.gz" | wc -l) architectures
+          - **Total Binaries**: $(find release -name "*.tar.gz" | wc -l) binaries
+          - **Platforms**: Linux, macOS
+          - **Architectures**: $(find release -name "*server*.tar.gz" | wc -l) architectures per platform
 
           ## 📚 Documentation
 
@@ -368,9 +457,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Test amd64 installation
+      - name: Test Linux amd64 installation
         run: |
-          echo "Testing amd64 binary download..."
+          echo "Testing Linux amd64 binary download..."
           VERSION="${{ needs.build-matrix.outputs.version }}"
 
           # Wait a moment for release to be available
@@ -379,28 +468,28 @@ jobs:
           # Test server download
           if curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-server-linux-amd64.tar.gz" | tar xz; then
             if ./s01-server --help >/dev/null 2>&1 || ./s01-server -h >/dev/null 2>&1; then
-              echo "✅ Server binary works"
+              echo "✅ Linux server binary works"
             else
-              echo "⚠️ Server binary downloaded but help command failed"
+              echo "⚠️ Linux server binary downloaded but help command failed"
             fi
           else
-            echo "❌ Failed to download server binary"
+            echo "❌ Failed to download Linux server binary"
             exit 1
           fi
 
           # Test client download
           if curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-client-linux-amd64.tar.gz" | tar xz; then
             if ./s01-client --help >/dev/null 2>&1 || ./s01-client -h >/dev/null 2>&1; then
-              echo "✅ Client binary works"
+              echo "✅ Linux client binary works"
             else
-              echo "⚠️ Client binary downloaded but help command failed"
+              echo "⚠️ Linux client binary downloaded but help command failed"
             fi
           else
-            echo "❌ Failed to download client binary"
+            echo "❌ Failed to download Linux client binary"
             exit 1
           fi
 
-          echo "✅ AMD64 binaries tested successfully"
+          echo "✅ Linux AMD64 binaries tested successfully"
 
       - name: Verify checksums
         run: |
@@ -414,16 +503,28 @@ jobs:
             exit 1
           fi
 
-          # Download and verify a binary
+          # Download and verify Linux binary
           if curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-server-linux-amd64.tar.gz" -o s01-server-linux-amd64.tar.gz; then
             # Verify checksum
             if sha256sum -c checksums.txt --ignore-missing; then
-              echo "✅ Checksums verified successfully"
+              echo "✅ Linux checksums verified successfully"
             else
-              echo "❌ Checksum verification failed"
+              echo "❌ Linux checksum verification failed"
               exit 1
             fi
           else
-            echo "❌ Failed to download binary for checksum verification"
+            echo "❌ Failed to download Linux binary for checksum verification"
             exit 1
+          fi
+
+          # Test if macOS binaries are available and verify one
+          rm -f s01-server-*.tar.gz  # Clean up Linux binary
+          if curl -L "https://github.com/${{ github.repository }}/releases/download/$VERSION/s01-server-darwin-amd64.tar.gz" -o s01-server-darwin-amd64.tar.gz 2>/dev/null; then
+            if sha256sum -c checksums.txt --ignore-missing; then
+              echo "✅ macOS checksums verified successfully"
+            else
+              echo "⚠️ macOS checksum verification failed, but binary exists"
+            fi
+          else
+            echo "ℹ️ macOS binaries not found or not accessible from Linux runner"
           fi

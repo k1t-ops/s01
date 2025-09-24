@@ -418,7 +418,7 @@ install_binary() {
     fi
 
     # Copy binary
-    if ! cp "$binary_path" "$target_path" 2>/dev/null; then
+    if ! sudo cp "$binary_path" "$target_path" 2>/dev/null; then
         log_error "Cannot copy binary to $target_path (permission denied)"
         log_info "Please run with elevated privileges:"
         log_info "  sudo cp $binary_path $target_path"
