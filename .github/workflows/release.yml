@@ -23,6 +23,8 @@ on:
 env:
   GO_VERSION: "1.21"
   CGO_ENABLED: 0
+  DOCKER_REGISTRY: ghcr.io
+  DOCKER_IMAGE_PREFIX: ${{ github.repository }}
 
 jobs:
   # Build matrix for multiple architectures and platforms
@@ -165,10 +167,71 @@ jobs:
             ${{ matrix.component }}/s01-${{ matrix.component }}-${{ matrix.os }}-${{ steps.arch.outputs.arch_name }}.tar.gz
             ${{ matrix.component }}/s01-${{ matrix.component }}-${{ matrix.os }}-${{ steps.arch.outputs.arch_name }}.tar.gz.sha256
 
+  # Build and push Docker images
+  build-docker:
+    name: Build Docker Images
+    needs: build-matrix
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        component: [server, client]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_PREFIX }}-${{ matrix.component }}
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ needs.build-matrix.outputs.version }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.component }}
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ needs.build-matrix.outputs.version }}
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+            GIT_COMMIT=${{ github.sha }}
+
   # Create release with all artifacts
   create-release:
     name: Create Release
-    needs: build-matrix
+    needs: [build-matrix, build-docker]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -241,20 +304,111 @@ jobs:
           cat > release_notes.md << EOF
           # s01 ${VERSION}
 
-          🚀 **Multi-Architecture Release** supporting Linux on multiple architectures!
+          🚀 **A secure, production-ready service discovery system with mutual TLS authentication and automatic health monitoring**
 
           ## 📦 What's Included
 
-          This release contains precompiled binaries for multiple platforms:
+          This release contains precompiled binaries for Linux and macOS:
 
           ### s01 Server
-          $(find release -name "s01-server-*.tar.gz" | sed 's/release\///' | sed 's/^/- **/' | sed 's/$/** - Server binary/')
+          $(find release -name "s01-server-*.tar.gz" | sed 's/release\///' | sed 's/^/- **/' | sed 's/$/** - Discovery server binary/')
 
           ### s01 Client
-          $(find release -name "s01-client-*.tar.gz" | sed 's/release\///' | sed 's/^/- **/' | sed 's/$/** - Client binary/')
+          $(find release -name "s01-client-*.tar.gz" | sed 's/release\///' | sed 's/^/- **/' | sed 's/$/** - Discovery client binary/')
 
           ### Checksums
           - **checksums.txt** - SHA256 checksums for all binaries
+
+          ## 🐳 Docker Images
+
+          Docker images are available for both server and client components with multi-architecture support:
+
+          ### Pull Images
+          \`\`\`bash
+          # Server image
+          docker pull ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_PREFIX }}-server:${VERSION}
+
+          # Client image
+          docker pull ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_PREFIX }}-client:${VERSION}
+
+          # Or use latest (if this is the latest release)
+          docker pull ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_PREFIX }}-server:latest
+          docker pull ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_PREFIX }}-client:latest
+          \`\`\`
+
+          ### Quick Start with Docker
+          \`\`\`bash
+          # Create a network
+          docker network create s01-net
+
+          # Start server (mount certificates)
+          docker run -d --name s01-server \\
+            --network s01-net \\
+            -p 8443:8443 -p 8080:8080 \\
+            -v /path/to/certs:/etc/ssl/certs:ro \\
+            -e SERVER_PORT=8443 \\
+            -e HEALTH_PORT=8080 \\
+            -e CERT_FILE=/etc/ssl/certs/server.crt \\
+            -e KEY_FILE=/etc/ssl/certs/server.key \\
+            -e CA_CERT_FILE=/etc/ssl/certs/ca.crt \\
+            ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_PREFIX }}-server:${VERSION}
+
+          # Start client (mount certificates)
+          docker run -d --name s01-client \\
+            --network s01-net \\
+            -v /path/to/certs:/etc/ssl/certs:ro \\
+            -e SERVICE_NAME=my-service \\
+            -e INSTANCE_NAME=\$(hostname) \\
+            -e SERVER_URL=https://s01-server:8443 \\
+            -e CERT_FILE=/etc/ssl/certs/client.crt \\
+            -e KEY_FILE=/etc/ssl/certs/client.key \\
+            -e CA_CERT_FILE=/etc/ssl/certs/ca.crt \\
+            ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_PREFIX }}-client:${VERSION}
+          \`\`\`
+
+          ### Docker Compose Example
+          \`\`\`yaml
+          version: '3.8'
+          services:
+            server:
+              image: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_PREFIX }}-server:${VERSION}
+              ports:
+                - "8443:8443"
+                - "8080:8080"
+              volumes:
+                - ./certs:/etc/ssl/certs:ro
+              environment:
+                CERT_FILE: /etc/ssl/certs/server.crt
+                KEY_FILE: /etc/ssl/certs/server.key
+                CA_CERT_FILE: /etc/ssl/certs/ca.crt
+
+            client:
+              image: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_PREFIX }}-client:${VERSION}
+              volumes:
+                - ./certs:/etc/ssl/certs:ro
+              environment:
+                SERVICE_NAME: my-service
+                SERVER_URL: https://server:8443
+                CERT_FILE: /etc/ssl/certs/client.crt
+                KEY_FILE: /etc/ssl/certs/client.key
+                CA_CERT_FILE: /etc/ssl/certs/ca.crt
+          \`\`\`
+
+          ### Supported Architectures
+          All Docker images support the following architectures:
+          - **linux/amd64** - Intel/AMD 64-bit
+          - **linux/arm64** - ARM 64-bit (AWS Graviton, Apple Silicon under Docker)
+          - **linux/arm/v7** - ARM 32-bit (Raspberry Pi)
+
+          ## 🔑 Key Features
+
+          - **🔐 Mutual TLS Security**: All communication encrypted and authenticated
+          - **📊 Health Monitoring**: Real-time CPU, memory, disk, and network metrics
+          - **⏰ Stale Detection**: Automatic "lost" status for unresponsive hosts
+          - **📈 Status History**: Configurable history tracking for trend analysis
+          - **🚀 Zero Dependencies**: Pure Go standard library, no external dependencies
+          - **🐳 Docker Ready**: Complete containerized deployment
+          - **🔧 Production Ready**: Configurable timeouts, limits, and monitoring
 
           ## 🏗️ Supported Platforms & Architectures
 
@@ -275,18 +429,37 @@ jobs:
 
           The installer automatically detects your platform and architecture:
 
+          ### Using curl
           \`\`\`bash
           # Install both server and client
-          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/get.sh | bash
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
 
           # Install server only
-          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/get.sh | bash -s -- --server-only
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash -s -- --server-only
 
           # Install client only
-          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/get.sh | bash -s -- --client-only
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash -s -- --client-only
 
           # Install specific version
-          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/get.sh | bash -s -- --version ${VERSION}
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash -s -- --version ${VERSION}
+          \`\`\`
+
+          ### Using wget
+          \`\`\`bash
+          # Install both server and client
+          wget -qO- https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
+
+          # Install server only
+          wget -qO- https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash -s -- --server-only
+          \`\`\`
+
+          ### Advanced Options
+          \`\`\`bash
+          # System-wide installation (requires sudo)
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sudo bash -s -- --system
+
+          # Custom install location
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash -s -- --prefix /opt/discovery
           \`\`\`
 
           ## 📥 Manual Download & Installation
@@ -337,8 +510,11 @@ jobs:
           # Download checksums
           curl -L "https://github.com/${{ github.repository }}/releases/download/${VERSION}/checksums.txt" -o checksums.txt
 
-          # Verify files
+          # Verify files (Linux)
           sha256sum -c checksums.txt
+
+          # Verify files (macOS)
+          shasum -a 256 -c checksums.txt
           \`\`\`
 
           ## 🔧 System Requirements
@@ -357,8 +533,27 @@ jobs:
           ## 🚀 Quick Start
 
           1. **Install**: Use the one-liner or download manually
-          2. **Configure**: Edit \`~/.config/s01/server.env\` and \`~/.config/s01/client.env\`
-          3. **Run**: Execute \`s01-server-run\` and \`s01-client-run\`
+          2. **Generate Certificates**: Set up step-ca and generate certificates
+          3. **Configure**: Edit \`~/.config/s01/server.env\` and \`~/.config/s01/client.env\`
+          4. **Run**: Execute \`s01-server-run\` and \`s01-client-run\`
+
+          ## 📋 Configuration
+
+          Key environment variables:
+
+          \`\`\`bash
+          SERVER_PORT=8443          # HTTPS API port
+          HEALTH_PORT=8080          # HTTP health check port
+          MAX_HISTORY=100           # Status history per host
+          STALE_TIMEOUT=300         # Seconds before marking host as "lost"
+          \`\`\`
+
+          ## 🔒 Status Types
+
+          - **\`healthy\`** - Host is functioning normally
+          - **\`degraded\`** - Host has issues but is still operational
+          - **\`unhealthy\`** - Host has serious issues
+          - **\`lost\`** - Host hasn't reported for > \`STALE_TIMEOUT\` seconds (auto-detected)
 
           ## 📋 Build Information
 
@@ -368,14 +563,15 @@ jobs:
           - **CGO**: Disabled (static linking)
           - **Total Binaries**: $(find release -name "*.tar.gz" | wc -l) binaries
           - **Platforms**: Linux, macOS
-          - **Architectures**: $(find release -name "*server*.tar.gz" | wc -l) architectures per platform
+          - **Docker Images**: Multi-architecture images for linux/amd64, linux/arm64, linux/arm/v7
+          - **Registry**: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_PREFIX }}
 
           ## 📚 Documentation
 
-          - [Installation Guide](https://github.com/${{ github.repository }}/blob/main/QUICK-INSTALL.md)
-          - [Binary Deployment](https://github.com/${{ github.repository }}/blob/main/BINARY-DEPLOYMENT.md)
-          - [Docker Usage](https://github.com/${{ github.repository }}/blob/main/DOCKER-USAGE.md)
-          - [Main Documentation](https://github.com/${{ github.repository }}#readme)
+          - **🚀 Ready to deploy in production?** → [DEPLOYMENT.md](https://github.com/${{ github.repository }}/blob/main/DEPLOYMENT.md)
+          - **🧪 Want to run comprehensive tests?** → [TESTING.md](https://github.com/${{ github.repository }}/blob/main/TESTING.md)
+          - **📖 Quick Installation Guide** → [QUICK-INSTALL.md](https://github.com/${{ github.repository }}/blob/main/QUICK-INSTALL.md)
+          - **📋 Main Documentation** → [README.md](https://github.com/${{ github.repository }}#readme)
 
           EOF
 
@@ -416,6 +612,13 @@ jobs:
           echo "**Download**: https://github.com/${{ github.repository }}/releases/tag/${{ needs.build-matrix.outputs.version }}" >> $GITHUB_STEP_SUMMARY
 
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🐳 Docker Images" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | Tag | Architectures |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-----|---------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Server | \`${{ needs.build-matrix.outputs.version }}\` | linux/amd64, linux/arm64, linux/arm/v7 |" >> $GITHUB_STEP_SUMMARY
+          echo "| Client | \`${{ needs.build-matrix.outputs.version }}\` | linux/amd64, linux/arm64, linux/arm/v7 |" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📦 Available Downloads" >> $GITHUB_STEP_SUMMARY
           echo "| File | Architecture | Size |" >> $GITHUB_STEP_SUMMARY
           echo "|------|--------------|------|" >> $GITHUB_STEP_SUMMARY
@@ -440,10 +643,14 @@ jobs:
           echo "### 🚀 Quick Installation Commands" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
           echo "# Auto-detect architecture and install both components" >> $GITHUB_STEP_SUMMARY
-          echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/get.sh | bash" >> $GITHUB_STEP_SUMMARY
+          echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "# Install specific version" >> $GITHUB_STEP_SUMMARY
-          echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/get.sh | bash -s -- --version ${{ needs.build-matrix.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash -s -- --version ${{ needs.build-matrix.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Pull Docker images" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_PREFIX }}-server:${{ needs.build-matrix.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_PREFIX }}-client:${{ needs.build-matrix.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
   # Test installation on different architectures (optional)

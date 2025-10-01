@@ -56,7 +56,7 @@ docker-compose -f "$PROJECT_DIR/docker-compose.yml" up -d step-ca
 echo -e "${YELLOW}Waiting for step-ca to be ready...${NC}"
 timeout=60
 count=0
-while [ $count -lt $timeout ]; do
+while [ $count -lt $timeout ] do
     if docker-compose -f "$PROJECT_DIR/docker-compose.yml" exec step-ca step ca health > /dev/null 2>&1; then
         echo -e "${GREEN}Step-ca is ready${NC}"
         break

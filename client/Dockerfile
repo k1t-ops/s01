@@ -1,73 +1,91 @@
 # Build stage
 FROM golang:1.21-alpine AS builder
 
-# Install ca-certificates for HTTPS
-RUN apk add --no-cache ca-certificates git
+# Build arguments
+ARG VERSION=dev
+ARG BUILD_DATE
+ARG GIT_COMMIT
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Create non-root user for runtime
+RUN addgroup -g 1001 -S s01 && \
+    adduser -u 1001 -S s01 -G s01
 
 # Set working directory
-WORKDIR /app
+WORKDIR /build
 
-# Copy go mod file (go.sum not needed since no external dependencies)
+# Copy go mod file
 COPY go.mod ./
 
-# Download dependencies (there are none, but good practice)
+# Download dependencies (none for this project, but good practice)
 RUN go mod download
 
 # Copy source code
 COPY . .
 
-# Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o s01-client .
+# Build the binary with version information
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -a -installsuffix cgo \
+    -ldflags="-w -s \
+    -X main.version=${VERSION} \
+    -X main.buildDate=${BUILD_DATE} \
+    -X main.gitCommit=${GIT_COMMIT}" \
+    -o s01-client .
 
-# Runtime stage
-FROM alpine:latest
+# Create minimal runtime image
+FROM scratch
 
-# Install ca-certificates and curl for health checks
-RUN apk --no-cache add ca-certificates curl
+# Copy timezone data for proper timestamp handling
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 
-# Create non-root user
-RUN addgroup -g 1001 -S s01 && \
-    adduser -u 1001 -S s01 -G s01
+# Copy CA certificates for HTTPS
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Copy user and group files
+COPY --from=builder /etc/passwd /etc/passwd
+COPY --from=builder /etc/group /etc/group
+
+# Copy the binary from builder stage
+COPY --from=builder /build/s01-client /app/s01-client
 
 # Set working directory
 WORKDIR /app
 
-# Copy the binary from builder stage
-COPY --from=builder /app/s01-client .
-
-# Create directories for certificates and config
-RUN mkdir -p /etc/ssl/certs /etc/s01 && \
-    chown -R s01:s01 /app /etc/ssl/certs /etc/s01
-
-# Health configuration can be provided via environment variables or mounted config
-
 # Switch to non-root user
-USER s01
+USER s01:s01
 
-# Default environment variables
-ENV SERVICE_NAME=docker-client
-ENV INSTANCE_NAME=client-01
-ENV SERVER_URL=https://s01-server:8443
-ENV CERT_FILE=/etc/ssl/certs/client.crt
-ENV KEY_FILE=/etc/ssl/certs/client.key
-ENV CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
-ENV LOG_LEVEL=info
-ENV REPORT_INTERVAL=30
-ENV TIMEOUT=30
-ENV RETRY_ATTEMPTS=3
-ENV RETRY_DELAY=5
+# Default environment variables for configuration
+ENV SERVICE_NAME=docker-client \
+    INSTANCE_NAME=client-01 \
+    SERVER_URL=https://s01-server:8443 \
+    LOG_LEVEL=info \
+    REPORT_INTERVAL=30 \
+    TIMEOUT=30 \
+    RETRY_ATTEMPTS=3 \
+    RETRY_DELAY=5
 
-# Health check environment variables
-ENV HEALTH_CPU_THRESHOLD=80.0
-ENV HEALTH_MEMORY_THRESHOLD=85.0
-ENV HEALTH_DISK_THRESHOLD=85.0
-ENV HEALTH_NETWORK_ENABLED=true
-ENV HEALTH_SCORE_HEALTHY_MIN=80
-ENV HEALTH_SCORE_DEGRADED_MIN=60
+# Certificate paths (must be mounted as volumes)
+ENV CERT_FILE=/etc/ssl/certs/client.crt \
+    KEY_FILE=/etc/ssl/certs/client.key \
+    CA_CERT_FILE=/etc/ssl/certs/ca.crt
 
-# Health check - verify the client can start (not that it can connect, since that requires certs)
-HEALTHCHECK --interval=60s --timeout=10s --start-period=10s --retries=3 \
-    CMD /app/s01-client --help >/dev/null 2>&1 || exit 1
+# Health monitoring configuration
+ENV HEALTH_CPU_THRESHOLD=80.0 \
+    HEALTH_MEMORY_THRESHOLD=85.0 \
+    HEALTH_DISK_THRESHOLD=85.0 \
+    HEALTH_NETWORK_ENABLED=true \
+    HEALTH_SCORE_HEALTHY_MIN=80 \
+    HEALTH_SCORE_DEGRADED_MIN=60
+
+# Metadata labels
+LABEL org.opencontainers.image.title="s01 Client" \
+      org.opencontainers.image.description="Service discovery client with health monitoring" \
+      org.opencontainers.image.vendor="s01" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${GIT_COMMIT}"
 
 # Run the client
-CMD ["./s01-client"]
+ENTRYPOINT ["/app/s01-client"]

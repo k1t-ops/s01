@@ -1,0 +1,246 @@
+openapi: 3.0.3
+info:
+  title: s01 Server API
+  description: Service discovery and status reporting API with health checking
+  version: "1.0.0"
+servers:
+  - url: https://localhost:8443
+    description: Main API (TLS, requires client certificate)
+  - url: http://localhost:8080
+    description: Health Check API (no TLS, no authentication)
+paths:
+  /api/v1/report:
+    post:
+      summary: Report host status and health metrics
+      description: >
+        Hosts post their current status and optional health metrics. Requires mTLS.
+      operationId: reportStatus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusRequest'
+      responses:
+        '200':
+          description: Status report accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+        '400':
+          description: Invalid or incomplete request
+        '405':
+          description: Method not allowed
+  /api/v1/hosts:
+    get:
+      summary: List all known hosts
+      description: Returns a list of latest known host status from all reporting instances.
+      operationId: getHosts
+      responses:
+        '200':
+          description: List of discovered hosts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryResponse'
+        '405':
+          description: Method not allowed
+  /api/v1/hosts/{service_name}/{instance_name}:
+    get:
+      summary: Get status and history for a host instance
+      description: Returns the full reporting history and details for a single service/instance.
+      operationId: getHostByName
+      parameters:
+        - in: path
+          name: service_name
+          schema:
+            type: string
+          required: true
+          description: Service name of the host
+        - in: path
+          name: instance_name
+          schema:
+            type: string
+          required: true
+          description: Instance name of the host
+      responses:
+        '200':
+          description: Detailed host instance status and history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HostHistoryResponse'
+        '404':
+          description: Host not found
+        '405':
+          description: Method not allowed
+  /health:
+    get:
+      summary: Health check endpoint
+      description: Lightweight endpoint for health checking; does not require certs/auth.
+      operationId: health
+      responses:
+        '200':
+          description: Service health
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+                  total_hosts:
+                    type: integer
+                  version:
+                    type: string
+                    example: 1.0.0
+        '404':
+          description: Not Found
+
+components:
+  schemas:
+    HealthCheck:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          description: Status string ("ok", "warn", "error")
+        message:
+          type: string
+        value:
+          type: string
+      required:
+        - name
+        - status
+    HealthMetrics:
+      type: object
+      properties:
+        cpu_usage:
+          type: number
+          format: float
+        memory_usage:
+          type: number
+          format: float
+        disk_usage:
+          type: number
+          format: float
+        network_ok:
+          type: boolean
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/HealthCheck'
+        overall_score:
+          type: integer
+      required:
+        - cpu_usage
+        - memory_usage
+        - disk_usage
+        - network_ok
+        - overall_score
+        - checks
+    HostStatus:
+      type: object
+      properties:
+        service_name:
+          type: string
+        instance_name:
+          type: string
+        ip_address:
+          type: string
+        status:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        client_cn:
+          type: string
+        health_metrics:
+          $ref: '#/components/schemas/HealthMetrics'
+      required:
+        - service_name
+        - instance_name
+        - ip_address
+        - status
+        - timestamp
+    HostResponse:
+      type: object
+      properties:
+        service_name:
+          type: string
+        instance_name:
+          type: string
+        status:
+          type: string
+        ip_address:
+          type: string
+        last_seen:
+          type: string
+          format: date-time
+        health_metrics:
+          $ref: '#/components/schemas/HealthMetrics'
+        client_cn:
+          type: string
+      required:
+        - service_name
+        - instance_name
+        - status
+        - ip_address
+        - last_seen
+    HostHistoryResponse:
+      type: object
+      properties:
+        service_name:
+          type: string
+        instance_name:
+          type: string
+        statuses:
+          type: array
+          items:
+            $ref: '#/components/schemas/HostStatus'
+        last_seen:
+          type: string
+          format: date-time
+      required:
+        - service_name
+        - instance_name
+        - statuses
+        - last_seen
+    StatusRequest:
+      type: object
+      properties:
+        service_name:
+          type: string
+        instance_name:
+          type: string
+        status:
+          type: string
+        health_metrics:
+          $ref: '#/components/schemas/HealthMetrics'
+      required:
+        - service_name
+        - instance_name
+        - status
+    DiscoveryResponse:
+      type: object
+      properties:
+        hosts:
+          type: array
+          items:
+            $ref: '#/components/schemas/HostResponse'
+        total:
+          type: integer
+      required:
+        - hosts
+        - total

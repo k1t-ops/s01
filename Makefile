@@ -38,7 +38,7 @@ start-prod: ## Start production environment
 	@echo "  Step-CA: https://localhost:9000"
 
 start-test: ## Start full test environment with all clients
-	@docker-compose -f docker-compose.yml -f docker-compose.test.yml up -d
+	@docker-compose -f docker-compose.test.yml up -d
 	@echo "Test environment started with all test clients"
 
 start-demo: ## Start services with demo clients (legacy)
@@ -59,12 +59,55 @@ stop-test: ## Stop test environment
 restart: stop start ## Restart core services
 
 # Testing and monitoring
-test: ## Run test suite
-	@./scripts/test-s01.sh
+test: test-build test-run ## Build images locally and run full test suite
 
-test-load: ## Start load testing environment
-	@docker-compose -f docker-compose.yml -f docker-compose.test.yml up -d load-test-client
-	@echo "Load test client started"
+test-build: ## Build all test images locally
+	@echo "Building test images locally..."
+	@docker-compose -f docker-compose.test.yml build --parallel
+	@echo "Test images built successfully"
+
+test-run: ## Run test suite (assumes images are built)
+	@echo "Starting test environment..."
+	@docker-compose -f docker-compose.test.yml up -d
+	@echo "Waiting for services to be ready..."
+	@sleep 15
+	@docker-compose -f docker-compose.test.yml run --rm test-runner all
+	@docker-compose -f docker-compose.test.yml down
+
+test-quick: ## Quick test with existing images
+	@docker-compose -f docker-compose.test.yml run --rm test-runner connectivity
+
+test-api: ## Run API tests only
+	@docker-compose -f docker-compose.test.yml up -d s01-server test-client
+	@sleep 10
+	@docker-compose -f docker-compose.test.yml run --rm test-runner api
+	@docker-compose -f docker-compose.test.yml down
+
+test-discovery: ## Run service discovery tests
+	@docker-compose -f docker-compose.test.yml up -d
+	@sleep 20
+	@docker-compose -f docker-compose.test.yml run --rm test-runner discovery
+	@docker-compose -f docker-compose.test.yml down
+
+test-performance: ## Run performance tests
+	@docker-compose -f docker-compose.test.yml up -d
+	@sleep 15
+	@docker-compose -f docker-compose.test.yml run --rm test-runner performance
+	@docker-compose -f docker-compose.test.yml down
+
+test-shell: ## Start test environment and open shell
+	@docker-compose -f docker-compose.test.yml up -d
+	@docker-compose -f docker-compose.test.yml exec test-runner /bin/bash
+
+test-clean: ## Clean test environment and results
+	@docker-compose -f docker-compose.test.yml down -v
+	@rm -rf test-results/
+	@echo "Test environment cleaned"
+
+test-load: ## Run load tests only
+	@docker-compose -f docker-compose.test.yml up -d s01-server load-test-client
+	@sleep 10
+	@docker-compose -f docker-compose.test.yml logs -f load-test-client
 
 health: ## Check service health
 	@echo "Service Health:"
@@ -80,7 +123,7 @@ status-prod: ## Show production service status
 	@docker-compose -f docker-compose.yml -f docker-compose.prod.yml ps
 
 status-test: ## Show test environment status
-	@docker-compose -f docker-compose.yml -f docker-compose.test.yml ps
+	@docker-compose -f docker-compose.test.yml ps
 
 # Certificate management
 cert: ## Generate client certificate (usage: make cert SERVICE=web INSTANCE=web-01)
@@ -99,7 +142,14 @@ logs-prod: ## Show production environment logs
 	@docker-compose -f docker-compose.yml -f docker-compose.prod.yml logs -f
 
 logs-test: ## Show test environment logs
-	@docker-compose -f docker-compose.yml -f docker-compose.test.yml logs -f
+	@docker-compose -f docker-compose.test.yml logs -f
+
+logs-test-results: ## Show test results
+	@if [ -f test-results/test-results-*.json ]; then \
+		cat test-results/test-results-*.json | jq '.summary'; \
+	else \
+		echo "No test results found. Run 'make test' first."; \
+	fi
 
 logs-server: ## Show s01 server logs
 	@docker-compose logs -f s01-server
@@ -108,7 +158,7 @@ logs-ca: ## Show step-ca logs
 	@docker-compose logs -f step-ca
 
 logs-clients: ## Show all test client logs
-	@docker-compose -f docker-compose.yml -f docker-compose.test.yml logs -f client-web-01 client-api-01 client-db-primary client-worker-01
+	@docker-compose -f docker-compose.test.yml logs -f client-web-01 client-api-01 client-db-primary client-worker-01
 
 # Development
 dev-server: ## Run s01 server locally

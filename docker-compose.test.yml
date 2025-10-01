@@ -1,6 +1,5 @@
-version: "3.8"
-
 services:
+  # Certificate Authority for testing
   step-ca:
     image: smallstep/step-ca:latest
     container_name: s01-ca-test
@@ -9,9 +8,10 @@ services:
       - "9000:9000"
     environment:
       - DOCKER_STEPCA_INIT_NAME=s01 CA Test
-      - DOCKER_STEPCA_INIT_DNS_NAMES=step-ca,localhost,127.0.0.1
+      - DOCKER_STEPCA_INIT_DNS_NAMES=localhost,s01-ca-test
       - DOCKER_STEPCA_INIT_REMOTE_MANAGEMENT=true
       - DOCKER_STEPCA_INIT_ACME=false
+      - DOCKER_STEPCA_INIT_PASSWORD=${CA_PASSWORD:-testpassword123}
     volumes:
       - ./ca/step:/home/step
       - ./ca/config:/etc/step-ca
@@ -24,67 +24,54 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    command:
-      [
-        "/usr/local/bin/step-ca",
-        "--password-file=/home/step/secrets/password",
-        "/home/step/config/ca.json",
-      ]
 
-  step-ca-init:
-    image: smallstep/step-ca:latest
-    container_name: s01-ca-init-test
-    environment:
-      - STEPCA_INIT_NAME=s01 CA Test
-      - STEPCA_INIT_DNS_NAMES=step-ca,localhost,127.0.0.1
-      - STEPCA_INIT_REMOTE_MANAGEMENT=true
-      - STEPCA_INIT_PASSWORD_FILE=/home/step/secrets/password
+  # Cert Initialization Service: creates server & client certs using step-cli
+  ca-init:
+    image: smallstep/step-cli:latest
+    container_name: s01-ca-init
+    depends_on:
+      step-ca:
+        condition: service_healthy
+    user: "0:0"
     volumes:
-      - ./ca/step:/home/step
-      - ./ca/config:/etc/step-ca
-      - ./ca/certs:/etc/ssl/step
+      - ./ca/certs:/out
+      - ./ca/step:/step
+      - ./scripts:/scripts
     networks:
       - s01-test-net
-    command: [
-        "sh",
-        "-c",
-        "if [ ! -f /home/step/config/ca.json ]; then
-        echo 'Initializing step-ca for testing...';
-        mkdir -p /home/step/secrets;
-        echo '${CA_PASSWORD:-testpassword123}' > /home/step/secrets/password;
-        step ca init \
-        --name='s01 CA Test' \
-        --dns='step-ca,localhost,127.0.0.1' \
-        --address=':9000' \
-        --provisioner='admin' \
-        --password-file=/home/step/secrets/password \
-        --with-ca-url='https://step-ca:9000' \
-        --no-db;
-        echo 's01 CA initialized successfully for testing';
-        else
-        echo 'Step-ca already initialized';
-        fi",
-      ]
+    command: /scripts/init-ca-docker.sh
 
-  s01-server:
+  # S01 Server - Build locally with test configuration
+  s01-server-test:
     build:
       context: ./server
       dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-test}
+        BUILD_DATE: ${BUILD_DATE:-now}
+        GIT_COMMIT: ${GIT_COMMIT:-local}
     container_name: s01-server-test
     restart: unless-stopped
     ports:
       - "8443:8443"
       - "8080:8080"
     environment:
-      - STEP_CA_URL=https://step-ca:9000
+      - STEP_CA_URL=https://s01-ca-test:9000
       - SERVER_PORT=8443
       - HEALTH_PORT=8080
       - MAX_HISTORY=50
-      - STALE_TIMEOUT=120
-      - CA_CERT_FILE=/etc/ssl/certs/ca_chain.crt
+      - STALE_TIMEOUT=60 # Shorter timeout for testing
       - LOG_LEVEL=debug
+      - CERT_FILE=/etc/ssl/certs/test-server.crt
+      - KEY_FILE=/etc/ssl/certs/test-server.key
+      - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
+      # Test-specific settings
+      - MAX_REQUEST_SIZE=1048576
+      - READ_TIMEOUT=10
+      - WRITE_TIMEOUT=10
+      - IDLE_TIMEOUT=30
     volumes:
-      - ./ca/certs:/etc/ssl/certs
+      - ./ca/certs:/etc/ssl/certs:ro
       - ./server/config:/etc/s01
     depends_on:
       step-ca:
@@ -92,24 +79,63 @@ services:
     networks:
       - s01-test-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 15s
+      test: ["CMD", "curl", "http://localhost:8080/health"]
+      interval: 5s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 5s
 
+  # Test Runner - Executes test suites
+  test-runner:
+    build:
+      context: .
+      dockerfile: tests/Dockerfile
+    container_name: s01-test-runner
+    environment:
+      - SERVER_URL=https://s01-server-test:8443
+      - HEALTH_URL=http://s01-server-test:8080/health
+      - CERT_FILE=/etc/ssl/certs/test-client.crt
+      - KEY_FILE=/etc/ssl/certs/test-client.key
+      - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
+      - LOG_LEVEL=debug
+      - TEST_TIMEOUT=300
+      - PARALLEL_TESTS=${PARALLEL_TESTS:-4}
+    volumes:
+      - ./ca/certs:/etc/ssl/certs:ro
+      - ./tests:/tests
+      - ./test-results:/results
+    depends_on:
+      s01-server-test:
+        condition: service_healthy
+      ca-init:
+        condition: service_completed_successfully
+      client-web-01:
+        condition: service_started
+      client-api-01:
+        condition: service_started
+      client-db-primary:
+        condition: service_started
+    networks:
+      - s01-test-net
+    command: ["/tests/run-tests.sh"]
+
+  # Client - Web Service Instance 01
   client-web-01:
     build:
       context: ./client
       dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-test}
+        BUILD_DATE: ${BUILD_DATE:-now}
+        GIT_COMMIT: ${GIT_COMMIT:-local}
     container_name: s01-client-web-01-test
     restart: unless-stopped
     environment:
       - SERVICE_NAME=web-service
-      - INSTANCE_NAME=web-01-test
-      - SERVER_URL=https://s01-server:8443
-      - CERT_FILE=/etc/ssl/certs/client.crt
-      - KEY_FILE=/etc/ssl/certs/client.key
+      - INSTANCE_NAME=web-01
+      - SERVER_URL=https://s01-server-test:8443
+      - CERT_FILE=/etc/ssl/certs/test-client.crt
+      - KEY_FILE=/etc/ssl/certs/test-client.key
       - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
       - LOG_LEVEL=debug
       - REPORT_INTERVAL=10
@@ -120,27 +146,34 @@ services:
       - HEALTH_MEMORY_THRESHOLD=80.0
       - HEALTH_DISK_THRESHOLD=85.0
       - HEALTH_SCORE_HEALTHY_MIN=85
+      - HEALTH_SCORE_DEGRADED_MIN=60
     volumes:
       - ./ca/certs:/etc/ssl/certs:ro
-      - ./client/health-config.json:/etc/s01/health-config.json:ro
     depends_on:
-      s01-server:
+      s01-server-test:
         condition: service_healthy
+      ca-init:
+        condition: service_completed_successfully
     networks:
       - s01-test-net
 
+  # Client - API Service Instance 01
   client-api-01:
     build:
       context: ./client
       dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-test}
+        BUILD_DATE: ${BUILD_DATE:-now}
+        GIT_COMMIT: ${GIT_COMMIT:-local}
     container_name: s01-client-api-01-test
     restart: unless-stopped
     environment:
       - SERVICE_NAME=api-service
-      - INSTANCE_NAME=api-01-test
-      - SERVER_URL=https://s01-server:8443
-      - CERT_FILE=/etc/ssl/certs/client.crt
-      - KEY_FILE=/etc/ssl/certs/client.key
+      - INSTANCE_NAME=api-01
+      - SERVER_URL=https://s01-server-test:8443
+      - CERT_FILE=/etc/ssl/certs/test-client.crt
+      - KEY_FILE=/etc/ssl/certs/test-client.key
       - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
       - LOG_LEVEL=debug
       - REPORT_INTERVAL=15
@@ -151,27 +184,34 @@ services:
       - HEALTH_MEMORY_THRESHOLD=85.0
       - HEALTH_DISK_THRESHOLD=90.0
       - HEALTH_SCORE_HEALTHY_MIN=80
+      - HEALTH_SCORE_DEGRADED_MIN=60
     volumes:
       - ./ca/certs:/etc/ssl/certs:ro
-      - ./client/health-config.json:/etc/s01/health-config.json:ro
     depends_on:
-      s01-server:
+      s01-server-test:
         condition: service_healthy
+      ca-init:
+        condition: service_completed_successfully
     networks:
       - s01-test-net
 
+  # Client - Database Primary
   client-db-primary:
     build:
       context: ./client
       dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-test}
+        BUILD_DATE: ${BUILD_DATE:-now}
+        GIT_COMMIT: ${GIT_COMMIT:-local}
     container_name: s01-client-db-primary-test
     restart: unless-stopped
     environment:
       - SERVICE_NAME=database
-      - INSTANCE_NAME=db-primary-test
-      - SERVER_URL=https://s01-server:8443
-      - CERT_FILE=/etc/ssl/certs/client.crt
-      - KEY_FILE=/etc/ssl/certs/client.key
+      - INSTANCE_NAME=db-primary
+      - SERVER_URL=https://s01-server-test:8443
+      - CERT_FILE=/etc/ssl/certs/test-client.crt
+      - KEY_FILE=/etc/ssl/certs/test-client.key
       - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
       - LOG_LEVEL=debug
       - REPORT_INTERVAL=20
@@ -182,28 +222,35 @@ services:
       - HEALTH_MEMORY_THRESHOLD=90.0
       - HEALTH_DISK_THRESHOLD=95.0
       - HEALTH_SCORE_HEALTHY_MIN=75
+      - HEALTH_SCORE_DEGRADED_MIN=55
       - HEALTH_NETWORK_ENABLED=true
     volumes:
       - ./ca/certs:/etc/ssl/certs:ro
-      - ./client/health-config.json:/etc/s01/health-config.json:ro
     depends_on:
-      s01-server:
+      s01-server-test:
         condition: service_healthy
+      ca-init:
+        condition: service_completed_successfully
     networks:
       - s01-test-net
 
+  # Client - Worker Service Instance 01
   client-worker-01:
     build:
       context: ./client
       dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-test}
+        BUILD_DATE: ${BUILD_DATE:-now}
+        GIT_COMMIT: ${GIT_COMMIT:-local}
     container_name: s01-client-worker-01-test
     restart: unless-stopped
     environment:
       - SERVICE_NAME=worker-service
-      - INSTANCE_NAME=worker-01-test
-      - SERVER_URL=https://s01-server:8443
-      - CERT_FILE=/etc/ssl/certs/client.crt
-      - KEY_FILE=/etc/ssl/certs/client.key
+      - INSTANCE_NAME=worker-01
+      - SERVER_URL=https://s01-server-test:8443
+      - CERT_FILE=/etc/ssl/certs/test-client.crt
+      - KEY_FILE=/etc/ssl/certs/test-client.key
       - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
       - LOG_LEVEL=debug
       - REPORT_INTERVAL=8
@@ -214,27 +261,34 @@ services:
       - HEALTH_MEMORY_THRESHOLD=85.0
       - HEALTH_DISK_THRESHOLD=80.0
       - HEALTH_SCORE_HEALTHY_MIN=70
+      - HEALTH_SCORE_DEGRADED_MIN=50
     volumes:
       - ./ca/certs:/etc/ssl/certs:ro
-      - ./client/health-config.json:/etc/s01/health-config.json:ro
     depends_on:
-      s01-server:
+      s01-server-test:
         condition: service_healthy
+      ca-init:
+        condition: service_completed_successfully
     networks:
       - s01-test-net
 
+  # Client - Worker Service Instance 02
   client-worker-02:
     build:
       context: ./client
       dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-test}
+        BUILD_DATE: ${BUILD_DATE:-now}
+        GIT_COMMIT: ${GIT_COMMIT:-local}
     container_name: s01-client-worker-02-test
     restart: unless-stopped
     environment:
       - SERVICE_NAME=worker-service
-      - INSTANCE_NAME=worker-02-test
-      - SERVER_URL=https://s01-server:8443
-      - CERT_FILE=/etc/ssl/certs/client.crt
-      - KEY_FILE=/etc/ssl/certs/client.key
+      - INSTANCE_NAME=worker-02
+      - SERVER_URL=https://s01-server-test:8443
+      - CERT_FILE=/etc/ssl/certs/test-client.crt
+      - KEY_FILE=/etc/ssl/certs/test-client.key
       - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
       - LOG_LEVEL=debug
       - REPORT_INTERVAL=12
@@ -245,25 +299,30 @@ services:
       - HEALTH_MEMORY_THRESHOLD=80.0
       - HEALTH_DISK_THRESHOLD=85.0
       - HEALTH_SCORE_HEALTHY_MIN=75
+      - HEALTH_SCORE_DEGRADED_MIN=55
     volumes:
       - ./ca/certs:/etc/ssl/certs:ro
-      - ./client/health-config.json:/etc/s01/health-config.json:ro
     depends_on:
-      s01-server:
+      s01-server-test:
         condition: service_healthy
     networks:
       - s01-test-net
 
+  # Test Client - Used for API testing
   test-client:
     build:
       context: ./client
       dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-test}
+        BUILD_DATE: ${BUILD_DATE:-now}
+        GIT_COMMIT: ${GIT_COMMIT:-local}
     container_name: s01-test-client
     restart: unless-stopped
     environment:
       - SERVICE_NAME=test-service
       - INSTANCE_NAME=test-client
-      - SERVER_URL=https://s01-server:8443
+      - SERVER_URL=https://s01-server-test:8443
       - CERT_FILE=/etc/ssl/certs/test-client.crt
       - KEY_FILE=/etc/ssl/certs/test-client.key
       - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
@@ -276,44 +335,173 @@ services:
       - HEALTH_MEMORY_THRESHOLD=85.0
       - HEALTH_DISK_THRESHOLD=85.0
       - HEALTH_SCORE_HEALTHY_MIN=80
+      - HEALTH_SCORE_DEGRADED_MIN=60
     volumes:
       - ./ca/certs:/etc/ssl/certs:ro
-      - ./client/health-config.json:/etc/s01/health-config.json:ro
     depends_on:
-      s01-server:
+      s01-server-test:
         condition: service_healthy
+      ca-init:
+        condition: service_completed_successfully
     networks:
       - s01-test-net
 
-  # Load testing client that cycles through different health states
+  # Load Test Client - Simulates various load patterns
   load-test-client:
     build:
       context: ./client
       dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-test}
+        BUILD_DATE: ${BUILD_DATE:-now}
+        GIT_COMMIT: ${GIT_COMMIT:-local}
     container_name: s01-load-test-client
     restart: unless-stopped
     environment:
-      - SERVICE_NAME=load-test-service
+      - SERVICE_NAME=load-test
       - INSTANCE_NAME=load-test-01
-      - SERVER_URL=https://s01-server:8443
-      - CERT_FILE=/etc/ssl/certs/client.crt
-      - KEY_FILE=/etc/ssl/certs/client.key
+      - SERVER_URL=https://s01-server-test:8443
+      - CERT_FILE=/etc/ssl/certs/test-client.crt
+      - KEY_FILE=/etc/ssl/certs/test-client.key
       - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
       - LOG_LEVEL=info
       - REPORT_INTERVAL=3
       - TIMEOUT=10
       - RETRY_ATTEMPTS=2
       - RETRY_DELAY=1
+      # Simulate varying health conditions
       - HEALTH_CPU_THRESHOLD=95.0
       - HEALTH_MEMORY_THRESHOLD=95.0
       - HEALTH_DISK_THRESHOLD=95.0
       - HEALTH_SCORE_HEALTHY_MIN=90
+      - HEALTH_SCORE_DEGRADED_MIN=70
     volumes:
       - ./ca/certs:/etc/ssl/certs:ro
-      - ./client/health-config.json:/etc/s01/health-config.json:ro
     depends_on:
-      s01-server:
+      s01-server-test:
         condition: service_healthy
+      ca-init:
+        condition: service_completed_successfully
+    networks:
+      - s01-test-net
+
+  # Unhealthy Client - Simulates an unhealthy service
+  unhealthy-client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-test}
+        BUILD_DATE: ${BUILD_DATE:-now}
+        GIT_COMMIT: ${GIT_COMMIT:-local}
+    container_name: s01-unhealthy-client
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=unhealthy-service
+      - INSTANCE_NAME=unhealthy-01
+      - SERVER_URL=https://s01-server-test:8443
+      - CERT_FILE=/etc/ssl/certs/test-client.crt
+      - KEY_FILE=/etc/ssl/certs/test-client.key
+      - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
+      - LOG_LEVEL=debug
+      - REPORT_INTERVAL=10
+      - TIMEOUT=10
+      - RETRY_ATTEMPTS=3
+      - RETRY_DELAY=2
+      # Set thresholds that will always trigger unhealthy status
+      - HEALTH_CPU_THRESHOLD=0.1
+      - HEALTH_MEMORY_THRESHOLD=0.1
+      - HEALTH_DISK_THRESHOLD=0.1
+      - HEALTH_SCORE_HEALTHY_MIN=99
+      - HEALTH_SCORE_DEGRADED_MIN=95
+    volumes:
+      - ./ca/certs:/etc/ssl/certs:ro
+    depends_on:
+      s01-server-test:
+        condition: service_healthy
+      ca-init:
+        condition: service_completed_successfully
+    networks:
+      - s01-test-net
+
+  # Flapping Client - Simulates a service that goes up and down
+  flapping-client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-test}
+        BUILD_DATE: ${BUILD_DATE:-now}
+        GIT_COMMIT: ${GIT_COMMIT:-local}
+    container_name: s01-flapping-client
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=flapping-service
+      - INSTANCE_NAME=flapping-01
+      - SERVER_URL=https://s01-server-test:8443
+      - CERT_FILE=/etc/ssl/certs/test-client.crt
+      - KEY_FILE=/etc/ssl/certs/test-client.key
+      - CA_CERT_FILE=/etc/ssl/certs/root_ca.crt
+      - LOG_LEVEL=debug
+      - REPORT_INTERVAL=5
+      - TIMEOUT=10
+      - RETRY_ATTEMPTS=1
+      - RETRY_DELAY=1
+      # Normal thresholds, but we'll control the service lifecycle
+      - HEALTH_CPU_THRESHOLD=80.0
+      - HEALTH_MEMORY_THRESHOLD=85.0
+      - HEALTH_DISK_THRESHOLD=85.0
+      - HEALTH_SCORE_HEALTHY_MIN=80
+      - HEALTH_SCORE_DEGRADED_MIN=60
+    volumes:
+      - ./ca/certs:/etc/ssl/certs:ro
+    depends_on:
+      s01-server-test:
+        condition: service_healthy
+    networks:
+      - s01-test-net
+    # Simulate flapping by restarting frequently
+    deploy:
+      restart_policy:
+        condition: any
+        delay: 30s
+        max_attempts: 0
+        window: 120s
+
+  # Prometheus for metrics collection (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: s01-prometheus-test
+    ports:
+      - "9090:9090"
+    # volumes:
+    # - ./tests/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    # - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    depends_on:
+      - s01-server-test
+    networks:
+      - s01-test-net
+
+  # Grafana for visualization (optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: s01-grafana-test
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./tests/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./tests/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
     networks:
       - s01-test-net
 
@@ -322,9 +510,19 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.21.0.0/16
+        - subnet: 172.21.0.0/24
+          gateway: 172.21.0.1
 
 volumes:
   step-data:
+    driver: local
   ca-config:
+    driver: local
   ca-certs:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+  test-results:
+    driver: local
