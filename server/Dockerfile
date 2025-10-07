@@ -59,7 +59,8 @@ ENV SERVER_PORT=8443 \
     HEALTH_PORT=8080 \
     MAX_HISTORY=100 \
     STALE_TIMEOUT=300 \
-    LOG_LEVEL=info
+    LOG_LEVEL=info \
+    ENABLE_TLS=true
 
 ENV CERT_FILE=/etc/ssl/certs/server.crt \
     KEY_FILE=/etc/ssl/certs/server.key \

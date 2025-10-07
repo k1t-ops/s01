@@ -99,6 +99,7 @@ type Config struct {
 	ReadTimeout    int
 	WriteTimeout   int
 	RequestTimeout int
+	EnableTLS      bool
 }
 
 // StatusRequest represents the incoming status report
@@ -117,9 +118,13 @@ type DiscoveryResponse struct {
 
 // NewS01Server creates a new s01 server instance
 func NewS01Server(config *Config, logger *slog.Logger) (*S01Server, error) {
-	tlsConfig, err := setupTLSConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to setup TLS: %v", err)
+	var tlsConfig *tls.Config
+	var err error
+	if config.EnableTLS {
+		tlsConfig, err = setupTLSConfig(config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to setup TLS: %v", err)
+		}
 	}
 
 	return &S01Server{
@@ -500,11 +505,10 @@ func (ds *S01Server) healthRouter(w http.ResponseWriter, r *http.Request) {
 
 // Start starts the s01 server
 func (ds *S01Server) Start() error {
-	// Main mTLS server
+	// Main server config, TLS optional based on EnableTLS flag
 	server := &http.Server{
 		Addr:         ":" + ds.config.ServerPort,
 		Handler:      http.HandlerFunc(ds.router),
-		TLSConfig:    ds.tlsConfig,
 		ReadTimeout:  time.Duration(ds.config.ReadTimeout) * time.Second,
 		WriteTimeout: time.Duration(ds.config.WriteTimeout) * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -519,16 +523,26 @@ func (ds *S01Server) Start() error {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	ds.logger.Info("Starting s01 server with mTLS", "port", ds.config.ServerPort)
-	ds.logger.Info("Starting health check server", "port", ds.config.HealthPort)
+	if ds.config.EnableTLS {
+		server.TLSConfig = ds.tlsConfig
+		ds.logger.Info("Starting s01 server with mTLS", "port", ds.config.ServerPort)
+		go func() {
+			if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				ds.logger.Error("Failed to start main server", "error", err)
+				os.Exit(1)
+			}
+		}()
+	} else {
+		ds.logger.Info("Starting s01 server without TLS termination (plain HTTP)", "port", ds.config.ServerPort)
+		go func() {
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				ds.logger.Error("Failed to start main server", "error", err)
+				os.Exit(1)
+			}
+		}()
+	}
 
-	// Start main server in goroutine
-	go func() {
-		if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
-			ds.logger.Error("Failed to start main server", "error", err)
-			os.Exit(1)
-		}
-	}()
+	ds.logger.Info("Starting health check server", "port", ds.config.HealthPort)
 
 	// Start health server in goroutine
 	go func() {
@@ -602,6 +616,7 @@ func loadConfig() (*Config, error) {
 		ReadTimeout:    getEnvInt("READ_TIMEOUT", 30),
 		WriteTimeout:   getEnvInt("WRITE_TIMEOUT", 30),
 		RequestTimeout: getEnvInt("REQUEST_TIMEOUT", 30),
+		EnableTLS:      getEnv("ENABLE_TLS", "true") == "true",
 	}
 
 	// Try to read config file if it exists
@@ -628,10 +643,12 @@ func loadConfig() (*Config, error) {
 		}
 	}
 
-	// Validate required files exist
-	for _, file := range []string{config.CertFile, config.KeyFile, config.CACertFile} {
-		if _, err := os.Stat(file); os.IsNotExist(err) {
-			return nil, fmt.Errorf("required file not found: %s", file)
+	// Validate required files exist only if TLS is enabled
+	if config.EnableTLS {
+		for _, file := range []string{config.CertFile, config.KeyFile, config.CACertFile} {
+			if _, err := os.Stat(file); os.IsNotExist(err) {
+				return nil, fmt.Errorf("required file not found: %s", file)
+			}
 		}
 	}
 
